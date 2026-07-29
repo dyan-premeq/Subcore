@@ -13,7 +13,7 @@
     "type-check": "tsc"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "^2.0.0-beta.4",
+    "@modelcontextprotocol/server": "^2.0.0",
     "fast-xml-builder": "^1.3.0",
     "fast-xml-parser": "^5.10.1",
     "zod": "^4.4.3"
