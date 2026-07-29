@@ -163,7 +163,7 @@ function registerToolsAndResources(server: McpServer) {
       description: 'Server metadata and available capabilities.',
       mimeType: 'application/json',
     },
-    async () => ({
+    () => ({
       contents: [
         {
           uri: 'rimsage://manifest',

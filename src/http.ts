@@ -1,19 +1,17 @@
 import { serve } from 'bun'
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
+import { createMcpHandler } from '@modelcontextprotocol/server'
 import { createServer } from './server'
+
+const mcpHandler = createMcpHandler(createServer)
 
 const httpServer = serve({
   routes: {
     '/health': Response.json({ status: 'ok' }),
-    '/mcp': async (req, bunServer) => {
+    '/mcp': (req, bunServer) => {
       // streaming MCP responses can exceed the default request idle timeout.
       bunServer.timeout(req, 0)
 
-      const mcpServer = createServer()
-      const transport = new WebStandardStreamableHTTPServerTransport()
-
-      await mcpServer.connect(transport)
-      return transport.handleRequest(req)
+      return mcpHandler.fetch(req)
     },
     '/*': new Response('Not Found', { status: 404 }),
   },

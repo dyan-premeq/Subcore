@@ -1,9 +1,6 @@
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
+import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { createServer } from './server'
 
-const server = createServer()
-const transport = new StdioServerTransport()
-
-await server.connect(transport)
+serveStdio(createServer)
 
 console.error('\x1b[32m%s\x1b[0m', 'RimSage MCP running...')
