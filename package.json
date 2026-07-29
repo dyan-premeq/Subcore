@@ -1,8 +1,17 @@
 {
   "name": "rimsage",
   "version": "1.0.0",
+  "description": "An MCP server that enables searching and browsing of RimWorld source code.",
   "main": "src/stdio.ts",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realloon/RimSage.git"
+  },
+  "files": [
+    "src"
+  ],
   "scripts": {
     "start": "bun src/stdio.ts",
     "start:http": "bun src/http.ts",
