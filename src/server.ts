@@ -14,7 +14,13 @@ const name = 'rimsage'
 const version = '0.17.0'
 const sandbox = new PathSandbox('dist/assets')
 
-function registerToolsAndResources(server: McpServer) {
+export function createServer() {
+  const server = new McpServer({ name, version })
+  registerTools(server)
+  return server
+}
+
+function registerTools(server: McpServer) {
   // tool: search
   server.registerTool(
     'search_source',
@@ -153,46 +159,4 @@ function registerToolsAndResources(server: McpServer) {
     ({ typeName, memberName }) =>
       readCsharpSymbol(db, sourcePath, typeName, memberName),
   )
-
-  // Some clients probe resources/* before using tools.
-  server.registerResource(
-    'manifest',
-    'rimsage://manifest',
-    {
-      title: 'RimSage Manifest',
-      description: 'Server metadata and available capabilities.',
-      mimeType: 'application/json',
-    },
-    () => ({
-      contents: [
-        {
-          uri: 'rimsage://manifest',
-          mimeType: 'application/json',
-          text: JSON.stringify(
-            {
-              name,
-              version,
-              resources: ['rimsage://manifest'],
-              tools: [
-                'search_source',
-                'read_file',
-                'list_directory',
-                'get_def_details',
-                'search_defs',
-                'read_csharp_symbol',
-              ],
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    }),
-  )
-}
-
-export function createServer() {
-  const server = new McpServer({ name, version })
-  registerToolsAndResources(server)
-  return server
 }
