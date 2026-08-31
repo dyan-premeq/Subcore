@@ -2,6 +2,7 @@
   "compilerOptions": {
     "lib": ["ESNext"],
     "module": "preserve",
+    "resolveJsonModule": true,
     "types": ["bun"],
     "verbatimModuleSyntax": true,
     "noEmit": true,

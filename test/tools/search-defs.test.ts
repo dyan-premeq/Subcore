@@ -112,6 +112,15 @@ describe('search-defs', () => {
     expect(text).toContain('[mehni.pickupandhaul] [ThingDef] TestGun (label: "patched gun") (+1 overridden)')
   })
 
+  test('dup=all returns every mod version without the override marker', () => {
+    const text = searchDefs(db, 'TestGun', undefined, undefined, 10, 'all').content[0]
+      .text as string
+
+    expect(text).toContain('[ludeon.rimworld] [ThingDef] TestGun')
+    expect(text).toContain('[mehni.pickupandhaul] [ThingDef] TestGun (label: "patched gun")')
+    expect(text).not.toContain('overridden)')
+  })
+
   test('filters results by mod packageId', () => {
     const result = searchDefsImpl(db, 'Gun', undefined, 'mehni.pickupandhaul', 10)
 
@@ -126,9 +135,34 @@ describe('search-defs', () => {
     expect(text).toContain('[TRUNCATED] Showing 1/3 results.')
   })
 
-  test('returns guidance when nothing matches', () => {
-    const text = searchDefs(db, 'MissingDef').content[0].text
+  test('returns structuredContent alongside the text rendering', () => {
+    const result = searchDefs(db, 'TestGun', undefined, undefined, 10)
 
-    expect(text).toBe('No results found. Try a shorter keyword.')
+    expect(result.structuredContent).toEqual({
+      total: 2,
+      results: [
+        {
+          defName: 'TestGun',
+          defType: 'ThingDef',
+          label: 'patched gun',
+          packageId: 'mehni.pickupandhaul',
+          versions: 2,
+        },
+        {
+          defName: 'TestGunJob',
+          defType: 'JobDef',
+          label: 'test gun job',
+          packageId: 'ludeon.rimworld',
+          versions: 1,
+        },
+      ],
+    })
+  })
+
+  test('returns structuredContent with total 0 when nothing matches', () => {
+    const result = searchDefs(db, 'MissingDef')
+
+    expect(result.content[0].text).toBe('No results found. Try a shorter keyword.')
+    expect(result.structuredContent).toEqual({ total: 0, results: [] })
   })
 })

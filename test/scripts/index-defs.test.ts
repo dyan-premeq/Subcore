@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { rebuildDefsIndex } from '../../src/scripts/index-defs'
 import { ensureSchema } from '../../src/db/schema'
 import { replaceMods, type ModInsertRow } from '../../src/repositories/mods-repo'
-import { searchDefsEffective, getDefDetailsEffective } from '../../src/repositories/defs-repo'
+import { searchDefsEffective, getDefDetailsRows } from '../../src/repositories/defs-repo'
 import { rmTemp } from '../helpers/fs'
 
 let tempRoot: string
@@ -53,6 +53,9 @@ beforeAll(async () => {
           <defName>VanillaOnly</defName>
           <label>vanilla only</label>
         </ThingDef>
+        <ThingDef Name="SharedBase" Abstract="True">
+          <label>core shared base</label>
+        </ThingDef>
       </Defs>
     `,
   )
@@ -70,7 +73,18 @@ beforeAll(async () => {
         </ThingDef>
         <ThingDef MayRequire="some.mod">
           <defName>ModOnly</defName>
-          <label>mod only</label>
+          <label>inactive in the profile: must be skipped</label>
+        </ThingDef>
+        <ThingDef MayRequire="beta.mod">
+          <defName>ModConditional</defName>
+          <label>active in the profile: indexed</label>
+        </ThingDef>
+        <ThingDef ParentName="GhostBase">
+          <defName>Orphan</defName>
+          <label>missing parent must not crash the build</label>
+        </ThingDef>
+        <ThingDef Name="SharedBase" Abstract="True">
+          <label>beta shared base</label>
         </ThingDef>
       </Defs>
     `,
@@ -101,6 +115,21 @@ beforeAll(async () => {
         <ThingDef>
           <defName>ShadowedDef</defName>
           <label>should not be indexed</label>
+        </ThingDef>
+      </Defs>
+    `,
+  )
+
+  // mod dir absent from the manifest: the manifest is the single source of
+  // truth for the effective file set, so the whole dir must be skipped
+  await mkdir(join(tempRoot, 'Mods/ghost.mod/Defs'), { recursive: true })
+  await write(
+    join(tempRoot, 'Mods/ghost.mod/Defs/Ghost.xml'),
+    `
+      <Defs>
+        <ThingDef>
+          <defName>GhostDef</defName>
+          <label>must not be indexed</label>
         </ThingDef>
       </Defs>
     `,
@@ -185,7 +214,7 @@ describe('index-defs', () => {
       expect(vanilla.statBases).toBeUndefined()
 
       // merged inheritance resolved through the abstract parent
-      const merged = getDefDetailsEffective(db, 'OverrideMe', 'ThingDef', 'merged')
+      const merged = getDefDetailsRows(db, 'OverrideMe', 'ThingDef', { view: 'merged' })
       expect(JSON.parse(merged[0]!.payload).statBases.MaxHitPoints).toBe(100)
     } finally {
       db.close()
@@ -247,7 +276,7 @@ describe('index-defs', () => {
     }
   })
 
-  test('indexes only effective files, with mayRequire + dist-relative paths', () => {
+  test('indexes only effective files, with dist-relative paths', () => {
     const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
     try {
       const shadowed = db
@@ -258,12 +287,93 @@ describe('index-defs', () => {
       expect(shadowed).toHaveLength(0) // root Defs copy was shadowed by 1.6/
 
       const row = db
-        .query<{ mayRequire: string | null; filePath: string }, { $name: string }>(
-          'SELECT mayRequire, filePath FROM defs WHERE defName = $name',
+        .query<{ filePath: string }, { $name: string }>(
+          'SELECT filePath FROM defs WHERE defName = $name',
         )
-        .get({ $name: 'ModOnly' })
-      expect(row?.mayRequire).toBe('some.mod')
+        .get({ $name: 'ModConditional' })
       expect(row?.filePath).toBe('Mods/beta.mod/1.6/Defs/PatchDefs.xml')
+    } finally {
+      db.close()
+    }
+  })
+
+  test('skips defs whose MayRequire is unsatisfied in the profile (game: not loaded)', () => {
+    const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
+    try {
+      const skipped = db
+        .query<{ defName: string }, { $name: string }>(
+          'SELECT defName FROM defs WHERE defName = $name',
+        )
+        .all({ $name: 'ModOnly' })
+      expect(skipped).toHaveLength(0) // some.mod is not in the profile
+    } finally {
+      db.close()
+    }
+  })
+
+  test('missing-parent defs index as roots instead of crashing the build', () => {
+    const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
+    try {
+      const rows = db
+        .query<{ mergedPayload: string }, { $name: string }>(
+          'SELECT mergedPayload FROM defs WHERE defName = $name',
+        )
+        .all({ $name: 'Orphan' })
+      expect(rows).toHaveLength(1)
+      const merged = JSON.parse(rows[0]!.mergedPayload)
+      expect(merged.label).toBe('missing parent must not crash the build')
+      expect(merged['@_ParentName']).toBeUndefined()
+    } finally {
+      db.close()
+    }
+  })
+
+  test('populates def_names with the @Name registry', () => {
+    const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
+    try {
+      const rows = db
+        .query<
+          { name: string; modId: number; loadOrder: number; defType: string; defName: string | null },
+          { $name: string }
+        >('SELECT * FROM def_names WHERE name = $name')
+        .all({ $name: 'GunBase' })
+      expect(rows).toEqual([
+        { name: 'GunBase', modId: 1, loadOrder: 0, defType: 'ThingDef', defName: null },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test('def_names keeps one row per (name, mod) registration across mods', () => {
+    const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
+    try {
+      const rows = db
+        .query<
+          { name: string; modId: number; loadOrder: number },
+          { $name: string }
+        >(
+          'SELECT name, modId, loadOrder FROM def_names WHERE name = $name ORDER BY loadOrder',
+        )
+        .all({ $name: 'SharedBase' })
+      expect(rows).toEqual([
+        { name: 'SharedBase', modId: 1, loadOrder: 0 },
+        { name: 'SharedBase', modId: 2, loadOrder: 1 },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test('skips dist mod dirs with no manifest entry (manifest is the source of truth)', () => {
+    const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
+    try {
+      const rows = db
+        .query<{ defName: string }, { $name: string }>(
+          'SELECT defName FROM defs WHERE defName = $name',
+        )
+        .all({ $name: 'GhostDef' })
+      expect(rows).toHaveLength(0)
     } finally {
       db.close()
     }
@@ -272,7 +382,7 @@ describe('index-defs', () => {
   test('merged inheritance works across the load-order-sorted corpus', () => {
     const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
     try {
-      const rows = getDefDetailsEffective(db, 'OverrideMe', 'ThingDef', 'merged')
+      const rows = getDefDetailsRows(db, 'OverrideMe', 'ThingDef', { view: 'merged' })
       expect(rows).toHaveLength(1)
       const merged = JSON.parse(rows[0]!.payload)
       // statBases inherited from the abstract parent defined in Core

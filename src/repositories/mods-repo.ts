@@ -97,3 +97,13 @@ export function getModByDataCategory(db: Database, category: string): ModsRow | 
 export function countMods(db: Database): number {
   return (db.query('SELECT COUNT(*) AS n FROM mods').get() as { n: number }).n
 }
+
+/** packageIds of the current dev profile: the MayRequire evaluation set. */
+export function listInProfilePackageIds(db: Database): string[] {
+  return db
+    .query<{ packageId: string }, SqlNamedParams>(
+      'SELECT packageId FROM mods WHERE inProfile = 1',
+    )
+    .all({})
+    .map(row => row.packageId)
+}

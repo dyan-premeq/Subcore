@@ -115,7 +115,9 @@ bun run import:mods /path/to/game --full     # force re-copy
 bun run build
 ```
 
-New/changed tools: `list_mods`, `search_source` with `scope` ('vanilla' | 'mods' | 'all' | packageId) and `loaded_only`, `search_defs` with `mod` filter and `[packageId]` prefixes (always shown, also in vanilla-only builds).
+New/changed tools: `list_mods`, `search_source` with `scope` ('vanilla' | 'mods' | 'all' | packageId) and `loaded_only`, `search_defs` with `mod` filter and `dup` ('effective' = load-order winner only, default; 'all' = every mod version), `get_def_details` with `view` ('merged' | 'raw'), `dup` and `mod` params plus a **Lineage** header (`defined by … → overridden by … → effective: …`) on every result.
+
+Def semantics follow the game's `XmlInheritance` for the current game version: parent selection by load order, missing parents / cycles degrade instead of failing the build, `MayRequire` / `MayRequireAnyOf` defs are skipped unless the referenced packageId is in the profile (case-insensitive, `|postfix` ignored). The `@Name` inheritance registry is queryable in `dist/index.db` (`def_names` table, one row per `@Name` registration per mod).
 
 ## Development
 

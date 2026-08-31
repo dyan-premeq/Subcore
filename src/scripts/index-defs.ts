@@ -5,13 +5,22 @@ import { join, sep } from 'node:path'
 import type { Def, ModsManifest } from '../types'
 import { defsPath, indexDbPath, modsAssetPath, modsManifestPath } from '../utils/env'
 import { parser } from '../utils/xml-utils'
-import { processDefs } from '../utils/def-resolver'
+import {
+  isMayRequireSatisfied,
+  processDefs,
+  type DefEntry,
+} from '../utils/def-resolver'
 import { ensureSchema } from '../db/schema'
-import { replaceDefs, type DefInsertRow } from '../repositories/defs-repo'
+import {
+  replaceDefNames,
+  replaceDefs,
+  type DefInsertRow,
+} from '../repositories/defs-repo'
 import {
   countMods,
   getModByDataCategory,
   getModByPackageId,
+  listInProfilePackageIds,
 } from '../repositories/mods-repo'
 import { readManifest } from '../utils/manifest'
 import { escapePackageDirName } from '../utils/mod-discovery'
@@ -53,15 +62,20 @@ export async function rebuildDefsIndex(
     }
 
     // 2. collect def file refs
+    // MayRequire is evaluated against the dev profile (design doc §6.2):
+    // the profile is the single source of truth for what is "active"
+    const activePackageIds = new Set(listInProfilePackageIds(db))
     const manifest = readManifest(manifestPath)
     const refs: DefFileRef[] = []
     refs.push(...(await scanVanillaDefs(db, defsSourcePath)))
     refs.push(...scanModDefs(db, modsSourcePath, manifest))
     console.log(`Collected ${refs.length} def files.`)
 
-    // 3. parse & flatten
+    // 3. parse & flatten (MayRequire-unsatisfied defs are not loaded by the
+    // game at all — skip them here so they neither index nor register @Names)
     console.log('Parsing files...')
     const flat: FlatDef[] = []
+    let mayRequireSkipped = 0
     await Promise.all(
       refs.map(async ref => {
         const xml = await file(ref.absPath).text()
@@ -72,22 +86,46 @@ export async function rebuildDefsIndex(
           if (!Array.isArray(defsForType)) continue
           for (const def of defsForType as Def[]) {
             if (!def || typeof def !== 'object') continue
+            if (
+              !isMayRequireSatisfied(
+                def['@_MayRequire'],
+                def['@_MayRequireAnyOf'],
+                activePackageIds,
+              )
+            ) {
+              mayRequireSkipped++
+              continue
+            }
             flat.push({ def: Object.assign({ defType }, def), defType, ref })
           }
         }
       }),
     )
+    if (mayRequireSkipped > 0) {
+      console.log(
+        `Skipped ${mayRequireSkipped} defs whose MayRequire is not satisfied by the profile.`,
+      )
+    }
 
-    // 4. resolve inheritance. Order by loadOrder so the existing resolver's
-    // "last named def wins" matches the game's parent preference; exact
-    // XmlInheritance semantics land in M2.
+    // 4. resolve inheritance (game XmlInheritance semantics, §4.3). The sort
+    // keeps same-mod def dedupe deterministic ("first file wins"); the
+    // resolver itself works from explicit load orders, not input order.
     console.log(`Resolving inheritance for ${flat.length} defs...`)
     flat.sort(
       (a, b) =>
         a.ref.loadOrder - b.ref.loadOrder ||
         compareStrings(a.ref.filePath, b.ref.filePath),
     )
-    const mergedDefs = processDefs(flat.map(entry => entry.def))
+    const entries: DefEntry[] = flat.map(entry => ({
+      def: entry.def,
+      defType: entry.defType,
+      modId: entry.ref.modId,
+      loadOrder: entry.ref.loadOrder,
+    }))
+    const { resolved: mergedDefs, nameRegistry, issues } = processDefs(entries)
+    for (const issue of issues) {
+      console.warn(`[def-resolver] ${issue.kind}: ${issue.detail}`)
+    }
 
     // 5. write (all versions kept; effective = highest loadOrder)
     console.log('Writing defs to db...')
@@ -130,7 +168,10 @@ export async function rebuildDefsIndex(
     })
 
     replaceDefs(db, rows)
-    console.log(`Build complete! ${rows.length} def rows written.`)
+    replaceDefNames(db, nameRegistry)
+    console.log(
+      `Build complete! ${rows.length} def rows, ${nameRegistry.length} @Name registrations written.`,
+    )
   } finally {
     db.close()
   }
@@ -187,27 +228,25 @@ function scanModDefs(
     const manifestMod = manifest?.mods.find(
       m => m.assetPath === `Mods/${dirName}` || escapePackageDirName(m.packageId) === dirName,
     )
-    const modRow = manifestMod ? getModByPackageId(db, manifestMod.packageId) : null
-
-    if (!modRow) {
-      console.warn(`No mod row for dist mod dir "${dirName}" (run index-mods first); skipping.`)
+    if (!manifestMod) {
+      console.warn(
+        `[warn] no manifest entry for dist mod dir "${dirName}" (run import-mods); skipping.`,
+      )
       continue
     }
 
-    // effective file set from the manifest; degrade to "all XML" with a
-    // loud warning when import-mods never ran
-    let files: string[]
-    if (manifestMod) {
-      files = manifestMod.effectiveFiles
-    } else {
+    const modRow = getModByPackageId(db, manifestMod.packageId)
+    if (!modRow) {
       console.warn(
-        `[warn] no manifest entry for ${dirName}; indexing ALL XML under it ` +
-          '(run import-mods for effective-set filtering)',
+        `No mod row for "${manifestMod.packageId}" (run index-mods first); skipping.`,
       )
-      files = listXmlUnder(join(modsSourcePath, dirName))
+      continue
     }
 
-    for (const rel of files) {
+    // effective file set from the manifest — the single source of truth for
+    // what the game actually loads (version-folder / LoadFolders shadowing
+    // was already resolved by import-mods)
+    for (const rel of manifestMod.effectiveFiles) {
       const posix = toPosix(rel)
       // only Defs/ folders produce defs (Patches are M3's patch_ops)
       if (!/(^|\/)Defs\//.test(posix)) continue
@@ -221,20 +260,6 @@ function scanModDefs(
   }
 
   console.log(`Mod def files: ${out.length}`)
-  return out
-}
-
-function listXmlUnder(root: string): string[] {
-  const out: string[] = []
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name.startsWith('.')) continue
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) walk(full)
-      else if (entry.name.toLowerCase().endsWith('.xml')) out.push(full.slice(root.length + 1))
-    }
-  }
-  if (existsSync(root)) walk(root)
   return out
 }
 

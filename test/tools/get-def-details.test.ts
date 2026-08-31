@@ -28,28 +28,49 @@ beforeAll(() => {
       dependencies: [],
       dataCategory: null,
     },
+    {
+      packageId: 'beta.mod',
+      name: 'Beta',
+      author: null,
+      source: 'workshop',
+      rootPath: '',
+      assetPath: 'Mods/beta.mod',
+      loadOrder: 2,
+      inProfile: true,
+      playerActive: false,
+      activeFolders: null,
+      warnings: [],
+      supportedVersions: [],
+      dependencies: [],
+      dataCategory: null,
+    },
   ])
 
-  replaceDefs(db, [
-    {
-      defName: 'TestGun',
+  const defRow = (modId: number, loadOrder: number, label: string) => ({
+    defName: 'TestGun',
+    defType: 'ThingDef',
+    modId,
+    loadOrder,
+    label: null,
+    filePath: null,
+    mayRequire: null,
+    rawPayload: JSON.stringify({
       defType: 'ThingDef',
-      modId: 1,
-      loadOrder: 0,
-      label: null,
-      filePath: null,
-      mayRequire: null,
-      rawPayload: JSON.stringify({
-        defType: 'ThingDef',
-        '@_ParentName': 'BaseGun',
-        defName: 'TestGun',
-      }),
-      mergedPayload: JSON.stringify({
-        defType: 'ThingDef',
-        defName: 'TestGun',
-        alwaysHaulable: true,
-      }),
-    },
+      '@_ParentName': 'BaseGun',
+      defName: 'TestGun',
+      label,
+    }),
+    mergedPayload: JSON.stringify({
+      defType: 'ThingDef',
+      defName: 'TestGun',
+      label,
+      alwaysHaulable: true,
+    }),
+  })
+
+  replaceDefs(db, [
+    defRow(1, 0, 'vanilla gun'),
+    defRow(2, 2, 'beta gun'),
     ...['BodyDef', 'ThingDef'].map(defType => ({
       defName: 'SharedName',
       defType,
@@ -74,9 +95,10 @@ describe('get-def-details', () => {
     expect(result.content[0].text).toContain('not found')
   })
 
-  test('renders raw and merged inheritance modes', () => {
-    const raw = getDefDetails(db, 'TestGun', 'ThingDef', 'raw').content[0].text
-    const merged = getDefDetails(db, 'TestGun', 'ThingDef').content[0].text
+  test('renders raw and merged views', () => {
+    const raw = getDefDetails(db, 'TestGun', 'ThingDef', { view: 'raw' }).content[0]
+      .text as string
+    const merged = getDefDetails(db, 'TestGun', 'ThingDef').content[0].text as string
 
     expect(raw).toContain('ParentName="BaseGun"')
     expect(raw).not.toContain('<alwaysHaulable>true</alwaysHaulable>')
@@ -84,9 +106,77 @@ describe('get-def-details', () => {
   })
 
   test('renders every Def when a name is shared across types', () => {
-    const text = getDefDetails(db, 'SharedName').content[0].text
+    const text = getDefDetails(db, 'SharedName').content[0].text as string
 
     expect(text).toContain('<BodyDef>')
     expect(text).toContain('<ThingDef>')
+  })
+
+  test('shows the override lineage for the effective version', () => {
+    const text = getDefDetails(db, 'TestGun', 'ThingDef').content[0].text as string
+
+    expect(text).toContain(
+      'Lineage: defined by ludeon.rimworld → effective: beta.mod',
+    )
+    expect(text).toContain('<label>beta gun</label>')
+  })
+
+  test('states a single-source lineage without overrides', () => {
+    const text = getDefDetails(db, 'SharedName', 'BodyDef').content[0].text as string
+
+    expect(text).toContain('Lineage: defined by ludeon.rimworld (effective)')
+  })
+
+  test('dup=all lists every mod version along the chain', () => {
+    const text = getDefDetails(db, 'TestGun', 'ThingDef', { dup: 'all' }).content[0]
+      .text as string
+
+    expect(text).toContain('--- [ludeon.rimworld] (loadOrder 0) ---')
+    expect(text).toContain('<label>vanilla gun</label>')
+    expect(text).toContain('--- [beta.mod] (loadOrder 2, effective) ---')
+    expect(text).toContain('<label>beta gun</label>')
+  })
+
+  test('mod filter narrows to one defining mod but keeps the global lineage', () => {
+    const text = getDefDetails(db, 'TestGun', 'ThingDef', {
+      dup: 'all',
+      mod: 'ludeon.rimworld',
+    }).content[0].text as string
+
+    expect(text).toContain('<label>vanilla gun</label>')
+    expect(text).not.toContain('beta gun')
+    // lineage is inherently global: full chain + explicit note
+    expect(text).toContain(
+      'defined by ludeon.rimworld \u2192 effective: beta.mod',
+    )
+    expect(text).toContain('full global override chain')
+  })
+
+  test('returns structuredContent alongside the text rendering', () => {
+    const result = getDefDetails(db, 'TestGun', 'ThingDef', { dup: 'all' })
+
+    expect(result.isError).toBeUndefined()
+    expect(result.structuredContent).toEqual({
+      lineage: [
+        { packageId: 'ludeon.rimworld', loadOrder: 0 },
+        { packageId: 'beta.mod', loadOrder: 2 },
+      ],
+      defs: [
+        {
+          defType: 'ThingDef',
+          packageId: 'ludeon.rimworld',
+          loadOrder: 0,
+          filePath: null,
+          xml: expect.stringContaining('<label>vanilla gun</label>'),
+        },
+        {
+          defType: 'ThingDef',
+          packageId: 'beta.mod',
+          loadOrder: 2,
+          filePath: null,
+          xml: expect.stringContaining('<label>beta gun</label>'),
+        },
+      ],
+    })
   })
 })

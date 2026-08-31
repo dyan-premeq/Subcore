@@ -6,13 +6,14 @@ import { sourcePath } from './utils/env'
 import { searchSource } from './tools/search-source'
 import { readFile } from './tools/read-file'
 import { listDirectory } from './tools/list-directory'
-import { getDefDetails } from './tools/get-def-details'
-import { searchDefs } from './tools/search-defs'
+import { getDefDetails, defDetailsOutputSchema } from './tools/get-def-details'
+import { searchDefs, searchDefsOutputSchema } from './tools/search-defs'
 import { readCsharpSymbol } from './tools/read-csharp-symbol'
 import { listMods } from './tools/list-mods'
+import pkg from '../package.json'
 
 const name = 'rimsage'
-const version = '1.0.1'
+const version = pkg.version
 const sandbox = new PathSandbox('dist/assets')
 
 export function createServer() {
@@ -50,6 +51,7 @@ function registerTools(server: McpServer) {
             'true = only files the game actually loads for the current version (skips old version folders and shadowed files). Default false searches everything.',
           ),
       }),
+      annotations: { readOnlyHint: true },
     },
     ({ query, file_pattern, case_sensitive, scope, loaded_only }) =>
       searchSource(sandbox, query, case_sensitive, file_pattern, {
@@ -84,6 +86,7 @@ function registerTools(server: McpServer) {
           .default(400)
           .describe('Max lines to return.'),
       }),
+      annotations: { readOnlyHint: true },
     },
     ({ path, start_line, line_count }) =>
       readFile(sandbox, path, start_line, line_count),
@@ -107,6 +110,7 @@ function registerTools(server: McpServer) {
           .default(100)
           .describe('Max items to return.'),
       }),
+      annotations: { readOnlyHint: true },
     },
     ({ path, limit }) => listDirectory(sandbox, path, limit),
   )
@@ -115,21 +119,35 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'get_def_details',
     {
-      description: 'Get XML of a Def.',
+      description: 'Get XML of a Def, with its mod override lineage.',
       inputSchema: z.object({
         defName: z.string().describe('Exact defName (e.g. `Gun_Revolver`).'),
         defType: z
           .string()
           .optional()
           .describe('Type filter (e.g. `ThingDef`, `JobDef`).'),
-        inheritance: z
+        view: z
           .enum(['merged', 'raw'])
           .default('merged')
-          .describe('Return merged inheritance or the raw indexed Def.'),
+          .describe('merged = inheritance-resolved XML, raw = as authored.'),
+        mod: z
+          .string()
+          .optional()
+          .describe(
+            'packageId filter (e.g. "mehni.pickupandhaul"); with dup="all" reads one specific mod version.',
+          ),
+        dup: z
+          .enum(['effective', 'all'])
+          .default('effective')
+          .describe(
+            'effective = the load-order winner (what the game uses); all = every defining mod\'s version along the override chain.',
+          ),
       }),
+      outputSchema: defDetailsOutputSchema,
+      annotations: { readOnlyHint: true },
     },
-    ({ defName, defType, inheritance }) =>
-      getDefDetails(db, defName, defType, inheritance),
+    ({ defName, defType, view, mod, dup }) =>
+      getDefDetails(db, defName, defType, { view, mod, dup }),
   )
 
   // tool: search defs
@@ -154,9 +172,18 @@ function registerTools(server: McpServer) {
           .max(100)
           .default(20)
           .describe('Max results to return.'),
+        dup: z
+          .enum(['effective', 'all'])
+          .default('effective')
+          .describe(
+            'effective = only the load-order winner per def; all = every mod\'s version.',
+          ),
       }),
+      outputSchema: searchDefsOutputSchema,
+      annotations: { readOnlyHint: true },
     },
-    ({ query, defType, mod, limit }) => searchDefs(db, query, defType, mod, limit),
+    ({ query, defType, mod, limit, dup }) =>
+      searchDefs(db, query, defType, mod, limit, dup),
   )
 
   // tool: read csharp symbol
@@ -175,6 +202,7 @@ function registerTools(server: McpServer) {
             'Optional method name within the type (e.g. "ExposeData", "ConfigErrors").',
           ),
       }),
+      annotations: { readOnlyHint: true },
     },
     ({ typeName, memberName }) =>
       readCsharpSymbol(db, sourcePath, typeName, memberName),
@@ -196,6 +224,7 @@ function registerTools(server: McpServer) {
           .optional()
           .describe('true = only mods active in the player game config (diagnostic view).'),
       }),
+      annotations: { readOnlyHint: true },
     },
     ({ inProfile, playerActive }) => listMods(db, { inProfile, playerActive }),
   )
