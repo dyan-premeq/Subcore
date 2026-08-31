@@ -14,14 +14,8 @@ export interface Def extends XmlObject {
   '@_ParentName'?: string
   '@_Abstract'?: string
   '@_Inherit'?: string
-}
-
-export interface DefsRow {
-  defName: string
-  defType: string
-  label: string | null
-  rawPayload: string
-  mergedPayload: string
+  '@_MayRequire'?: string
+  '@_MayRequireAnyOf'?: string
 }
 
 export interface CsharpIndexRow {
@@ -31,3 +25,120 @@ export interface CsharpIndexRow {
 }
 
 export type SqlNamedParams = Extract<SQLQueryBindings, Record<string, unknown>>
+
+// #region Mod support (M1)
+
+export type ModSource = 'builtin' | 'dlc' | 'local' | 'workshop'
+
+export interface ModDependency {
+  packageId: string
+  displayName?: string
+}
+
+/** One <li> entry of a LoadFolders.xml version key. */
+export interface LoadFolderEntry {
+  /** '' means the mod root itself (the game's "/" shorthand). */
+  folderName: string
+  requiredAnyOf?: string[]
+  requiredAllOf?: string[]
+  disallowedAnyOf?: string[]
+}
+
+export interface ModInfo {
+  /** lowercase normalized */
+  packageId: string
+  name: string
+  author?: string
+  source: ModSource
+  /** original directory on disk */
+  rootPath: string
+  supportedVersions: string[]
+  /** LoadFolders.xml parse result keyed by normalized version ("1.6", "default") */
+  loadFolders: Record<string, LoadFolderEntry[]>
+  /** legacy 'N.N' folders present at the mod root */
+  versionDirs: string[]
+  dependencies: ModDependency[]
+  loadAfter: string[]
+  loadBefore: string[]
+  incompatibleWith: string[]
+  warnings: string[]
+  /** Data/<folder> folder name for builtin/dlc packages (used to map vanilla defs) */
+  dataCategory?: string
+}
+
+export type ProfileBase = 'core-only' | 'all-dlc'
+
+export interface Profile {
+  name: string
+  gameVersion?: string
+  base: ProfileBase
+  /** order irrelevant when autoOrder=true */
+  mods: string[]
+  autoOrder: boolean
+}
+
+export type LoadOrderIssueKind =
+  | 'not-found'
+  | 'missing-dependency'
+  | 'incompatible-with'
+  | 'version-unsupported'
+  | 'cycle'
+
+export interface LoadOrderIssue {
+  packageId: string
+  kind: LoadOrderIssueKind
+  detail: string
+}
+
+export interface ResolvedLoadOrder {
+  /** includes the vanilla base; loadOrder = array index */
+  ordered: ModInfo[]
+  issues: LoadOrderIssue[]
+}
+
+export interface ManifestMod extends ModInfo {
+  loadOrder: number
+  inProfile: boolean
+  playerActive: boolean
+  /** dist/assets-relative root ('' for builtin/dlc, 'Mods/<pkg>' for mods) */
+  assetPath: string
+  /** selected load folders, descending in-mod priority ('.' = mod root) */
+  activeFolders: string[]
+  /** files taking part in defs/patch indexing, relative to the mod root */
+  effectiveFiles: string[]
+  /** files shadowed by a higher-priority load folder (kept for reference) */
+  shadowedFiles: string[]
+  issues: LoadOrderIssue[]
+}
+
+export interface ModsManifest {
+  generatedAt: string
+  gameVersion: string
+  profile: Profile
+  /** player ModsConfig active list snapshot (diagnostics only), null if unreadable */
+  playerActivePackageIds: string[] | null
+  /** in-profile mods, ordered by loadOrder (base first) */
+  mods: ManifestMod[]
+  /** discovered but not in the profile (metadata only, not copied/indexed) */
+  discoveredNotInProfile: ModInfo[]
+}
+
+export interface ModsRow {
+  modId: number
+  packageId: string
+  name: string | null
+  author: string | null
+  source: ModSource
+  rootPath: string
+  assetPath: string
+  loadOrder: number
+  inProfile: number
+  playerActive: number
+  activeFolders: string | null
+  warnings: string | null
+  supportedVersions: string | null
+  dependencies: string | null
+  dataCategory: string | null
+}
+
+// #endregion

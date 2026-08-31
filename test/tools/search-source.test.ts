@@ -78,3 +78,101 @@ describe('search-source', () => {
     expect(searchSource(sandbox, '[abc')).rejects.toThrow()
   })
 })
+
+describe('search-source scope', () => {
+  let testDir: string
+  let sandbox: PathSandbox
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'rimsage-scope-'))
+    sandbox = new PathSandbox(testDir)
+    await write(join(testDir, 'Defs', 'vanilla.xml'), 'target_vanilla')
+    await write(join(testDir, 'Mods/m1/1.6/Defs/active.xml'), 'target_mod_active')
+    await write(join(testDir, 'Mods/m1/1.5/Defs/old.xml'), 'target_mod_old')
+    await write(join(testDir, 'Mods/m1/Defs/shadowed.xml'), 'target_mod_shadowed')
+  })
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('scope=vanilla searches only game Defs/Source', async () => {
+    const result = await searchSourceImpl(sandbox, 'target_', false, undefined, {
+      scope: 'vanilla',
+    })
+    expect(result.output).toContain('vanilla.xml')
+    expect(result.output).not.toContain('Mods')
+  })
+
+  test('scope=mods searches only imported mods', async () => {
+    const result = await searchSourceImpl(sandbox, 'target_', false, undefined, {
+      scope: 'mods',
+    })
+    expect(result.output).toContain('active.xml')
+    expect(result.output).not.toContain('vanilla.xml')
+  })
+
+  test('scope=packageId searches one mod; unknown ids yield guidance', async () => {
+    const result = await searchSourceImpl(sandbox, 'target_', false, undefined, {
+      scope: 'm1',
+    })
+    expect(result.output).toContain('active.xml')
+    expect(result.output).not.toContain('vanilla.xml')
+
+    const unknown = await searchSourceImpl(sandbox, 'target_', false, undefined, {
+      scope: 'nope.mod',
+    })
+    expect(unknown.guidance).toContain('nope.mod')
+  })
+
+
+
+  test('loaded_only=true excludes non-active version folders and shadowed files', async () => {
+    const manifest = {
+      generatedAt: '',
+      gameVersion: '1.6',
+      profile: { name: 't', base: 'all-dlc' as const, mods: ['m1'], autoOrder: true },
+      playerActivePackageIds: null,
+      mods: [
+        {
+          packageId: 'm1',
+          name: 'm1',
+          source: 'local' as const,
+          rootPath: '/mods/m1',
+          assetPath: 'Mods/m1',
+          loadOrder: 1,
+          inProfile: true,
+          playerActive: false,
+          supportedVersions: [],
+          loadFolders: {},
+          versionDirs: ['1.5'],
+          dependencies: [],
+          loadAfter: [],
+          loadBefore: [],
+          incompatibleWith: [],
+          warnings: [],
+          activeFolders: ['1.6', '.'],
+          effectiveFiles: ['1.6/Defs/active.xml'],
+          shadowedFiles: ['Defs/shadowed.xml'],
+          issues: [],
+        },
+      ],
+      discoveredNotInProfile: [],
+    }
+
+    const loaded = await searchSourceImpl(sandbox, 'target_mod', false, undefined, {
+      scope: 'mods',
+      loadedOnly: true,
+      manifest,
+    })
+    expect(loaded.output).toContain('active.xml')
+    expect(loaded.output).not.toContain('old.xml')
+    expect(loaded.output).not.toContain('shadowed.xml')
+
+    const everything = await searchSourceImpl(sandbox, 'target_mod', false, undefined, {
+      scope: 'mods',
+    })
+    expect(everything.output).toContain('old.xml')
+    expect(everything.output).toContain('shadowed.xml')
+  })
+})

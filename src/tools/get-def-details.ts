@@ -1,14 +1,9 @@
 import type { Database } from 'bun:sqlite'
-import type { DefsRow, SqlNamedParams } from '../types'
 import { builder } from '../utils/xml-utils'
 import { textResponse } from '../utils/mcp-response'
+import { getDefDetailsEffective } from '../repositories/defs-repo'
 
 type DefInheritanceMode = 'merged' | 'raw'
-
-type DefDetailRow = {
-  defType: DefsRow['defType']
-  payload: string
-}
 
 type GetDefDetailsResponse = ReturnType<typeof textResponse> & {
   isError?: boolean
@@ -19,17 +14,8 @@ export function getDefDetailsImpl(
   defName: string,
   defType?: string,
   inheritance: DefInheritanceMode = 'merged',
-): DefDetailRow[] {
-  const params: SqlNamedParams = { $name: defName }
-  const payloadColumn = inheritance === 'raw' ? 'rawPayload' : 'mergedPayload'
-  let queryStr = `SELECT defType, ${payloadColumn} AS payload FROM defs WHERE defName = $name`
-
-  if (defType) {
-    queryStr += ' AND defType = $type'
-    params.$type = defType
-  }
-
-  return db.query<DefDetailRow, SqlNamedParams>(queryStr).all(params)
+) {
+  return getDefDetailsEffective(db, defName, defType, inheritance)
 }
 
 export function getDefDetails(

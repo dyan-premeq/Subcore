@@ -3,6 +3,8 @@ import { file, Glob } from 'bun'
 import { Database } from 'bun:sqlite'
 import { join } from 'node:path'
 import { indexDbPath, sourcePath } from '../utils/env'
+import { ensureSchema } from '../db/schema'
+import { replaceCsharpIndex } from '../repositories/csharp-repo'
 
 interface CsharpIndexInsertRow {
   $typeName: CsharpIndexRow['typeName']
@@ -24,23 +26,9 @@ export async function rebuildCsharpIndex(
   const db = new Database(dbPath)
 
   try {
-    db.run(`
-      DROP TABLE IF EXISTS csharp_index;
-    `)
+    ensureSchema(db)
 
-    db.run(`
-      CREATE TABLE csharp_index (
-        typeName TEXT,
-        filePath TEXT,
-        startLine INTEGER,
-        PRIMARY KEY (typeName, filePath)
-      );
-    `)
-
-    const insert = db.prepare<unknown, CsharpIndexInsertParams>(`
-      INSERT OR REPLACE INTO csharp_index (typeName, filePath, startLine)
-      VALUES ($typeName, $filePath, $startLine)
-    `)
+    db.run('DELETE FROM csharp_index')
 
     const glob = new Glob('**/*.cs')
 
@@ -78,13 +66,14 @@ export async function rebuildCsharpIndex(
 
     console.log(`Found ${fileCount} files. Writing ${typeCount} types to DB...`)
 
-    const transaction = db.transaction((entries: CsharpIndexInsertParams[]) => {
-      for (const entry of entries) {
-        insert.run(entry)
-      }
-    })
-
-    transaction(batch)
+    replaceCsharpIndex(
+      db,
+      batch.map(entry => ({
+        typeName: entry.$typeName as string,
+        filePath: entry.$filePath as string,
+        startLine: entry.$startLine as number,
+      })),
+    )
     console.log(`Indexing complete.`)
   } finally {
     db.close()

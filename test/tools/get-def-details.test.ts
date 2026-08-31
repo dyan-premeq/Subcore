@@ -1,51 +1,67 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { getDefDetails } from '../../src/tools/get-def-details'
+import { ensureSchema } from '../../src/db/schema'
+import { replaceMods } from '../../src/repositories/mods-repo'
+import { replaceDefs } from '../../src/repositories/defs-repo'
 
 let db: Database
 
 beforeAll(() => {
   db = new Database(':memory:')
-  db.run(`
-    CREATE TABLE defs (
-      defName TEXT,
-      defType TEXT,
-      label TEXT,
-      rawPayload JSON,
-      mergedPayload JSON,
-      PRIMARY KEY (defName, defType)
-    )
-  `)
+  ensureSchema(db)
 
-  const insert = db.prepare(`
-    INSERT INTO defs (defName, defType, label, rawPayload, mergedPayload)
-    VALUES ($defName, $defType, NULL, $rawPayload, $mergedPayload)
-  `)
+  replaceMods(db, [
+    {
+      packageId: 'ludeon.rimworld',
+      name: 'Core',
+      author: null,
+      source: 'builtin',
+      rootPath: '',
+      assetPath: '',
+      loadOrder: 0,
+      inProfile: true,
+      playerActive: false,
+      activeFolders: null,
+      warnings: [],
+      supportedVersions: [],
+      dependencies: [],
+      dataCategory: null,
+    },
+  ])
 
-  insert.run({
-    $defName: 'TestGun',
-    $defType: 'ThingDef',
-    $rawPayload: JSON.stringify({
-      defType: 'ThingDef',
-      '@_ParentName': 'BaseGun',
+  replaceDefs(db, [
+    {
       defName: 'TestGun',
-    }),
-    $mergedPayload: JSON.stringify({
       defType: 'ThingDef',
-      defName: 'TestGun',
-      alwaysHaulable: true,
-    }),
-  })
-
-  for (const defType of ['BodyDef', 'ThingDef']) {
-    const payload = JSON.stringify({ defType, defName: 'SharedName' })
-    insert.run({
-      $defName: 'SharedName',
-      $defType: defType,
-      $rawPayload: payload,
-      $mergedPayload: payload,
-    })
-  }
+      modId: 1,
+      loadOrder: 0,
+      label: null,
+      filePath: null,
+      mayRequire: null,
+      rawPayload: JSON.stringify({
+        defType: 'ThingDef',
+        '@_ParentName': 'BaseGun',
+        defName: 'TestGun',
+      }),
+      mergedPayload: JSON.stringify({
+        defType: 'ThingDef',
+        defName: 'TestGun',
+        alwaysHaulable: true,
+      }),
+    },
+    ...['BodyDef', 'ThingDef'].map(defType => ({
+      defName: 'SharedName',
+      defType,
+      modId: 1,
+      loadOrder: 0,
+      label: null,
+      filePath: null,
+      mayRequire: null,
+      rawPayload: JSON.stringify({ defType, defName: 'SharedName' }),
+      mergedPayload: JSON.stringify({ defType, defName: 'SharedName' }),
+    })),
+  ])
 })
 
 afterAll(() => db.close())

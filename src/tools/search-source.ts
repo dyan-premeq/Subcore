@@ -1,16 +1,33 @@
 import { spawn } from 'bun'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { PathSandbox } from '../utils/path-sandbox'
 import { textResponse } from '../utils/mcp-response'
+import { readManifest } from '../utils/manifest'
+import { escapePackageDirName } from '../utils/mod-discovery'
+import type { ManifestMod, ModsManifest } from '../types'
 
 const MAX_OUTPUT_SIZE = 100 * 1024
 const MAX_RESULT_LINES = 400
 const STDERR_CAPTURE_SIZE = 8 * 1024
+
+export type SearchScope = 'vanilla' | 'mods' | 'all' | string
+
+export interface SearchSourceOptions {
+  /** 'vanilla' | 'mods' | 'all' (default) | a packageId */
+  scope?: SearchScope
+  /** true = restrict to the manifest's active-corpus files (default false) */
+  loadedOnly?: boolean
+  /** injectable for tests; defaults to dist/mods-manifest.json */
+  manifest?: ModsManifest | null
+}
 
 export async function searchSourceImpl(
   sandbox: PathSandbox,
   query: string,
   caseSensitive: boolean = false,
   filePattern?: string,
+  options: SearchSourceOptions = {},
 ) {
   const args = ['--line-number', '--heading', '--color', 'never']
 
@@ -24,10 +41,38 @@ export async function searchSourceImpl(
     args.push('-g', filePattern)
   }
 
-  // search pattern
+  // search pattern + paths
   args.push('-e', query)
+
+  const resolved = resolveScopePaths(sandbox.basePath, options.scope ?? 'all')
+  if (resolved.guidance !== undefined) {
+    return { output: '', exceededOutputLimit: false, guidance: resolved.guidance }
+  }
+  // skip scopes that point at directories missing from this dist (a vanilla
+  // sandbox has no Mods/, a mods-less one may lack Source/) instead of
+  // making rg fail
+  const scopePaths = (resolved.paths ?? []).filter(path => {
+    if (path === '.') return true
+    return existsSync(join(sandbox.basePath, path))
+  })
+  if (scopePaths.length === 0) {
+    // requested scope has no files in this dist at all
+    return { output: '', exceededOutputLimit: false }
+  }
+  args.push(...scopePaths)
+
+  const exclusions = options.loadedOnly
+    ? resolveLoadedOnlyExclusions(
+        options.scope ?? 'all',
+        options.manifest !== undefined ? options.manifest : readManifest(),
+      )
+    : []
+  for (const glob of exclusions) {
+    args.push('-g', glob)
+  }
+
   const rgProcess = spawn({
-    cmd: ['rg', ...args, '.'],
+    cmd: ['rg', ...args],
     cwd: sandbox.basePath,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -73,18 +118,88 @@ export async function searchSourceImpl(
   throw new Error(`rg failed with exit code ${exitCode}`)
 }
 
+interface ScopeResolution {
+  paths?: string[]
+  guidance?: string
+}
+
+/**
+ * Resolves rg path arguments for a scope. Paths are relative to the sandbox
+ * root (dist/assets). Unknown packageIds or a missing Mods tree produce
+ * guidance instead of a silent empty result.
+ */
+function resolveScopePaths(sandboxRoot: string, scope: SearchScope): ScopeResolution {
+  if (scope === 'all') return { paths: ['.'] }
+  if (scope === 'vanilla') return { paths: ['Defs', 'Source'] }
+
+  const modsRoot = join(sandboxRoot, 'Mods')
+  if (scope === 'mods') {
+    return existsSync(modsRoot)
+      ? { paths: ['Mods'] }
+      : { guidance: 'No mods imported yet. Run import-mods + build, or use scope "vanilla".' }
+  }
+
+  const dir = `Mods/${escapePackageDirName(scope)}`
+  if (!existsSync(join(modsRoot, escapePackageDirName(scope)))) {
+    return {
+      guidance:
+        `Scope "${scope}" not found in dist/assets/Mods. ` +
+        'List available mods with `list_mods`, or add the packageId to your profile ' +
+        'and re-run import-mods + build.',
+    }
+  }
+  return { paths: [dir] }
+}
+
+/**
+ * Exclusion globs for loaded_only=true: non-selected version folders and
+ * shadowed files stay searchable in loaded_only=false mode only.
+ */
+function resolveLoadedOnlyExclusions(
+  scope: SearchScope,
+  manifest: ModsManifest | null,
+): string[] {
+  if (!manifest) return []
+
+  const mods: ManifestMod[] = manifest.mods.filter(
+    mod =>
+      mod.assetPath !== '' &&
+      (scope === 'all' || scope === 'mods' || mod.packageId === scope.toLowerCase()),
+  )
+
+  const globs: string[] = []
+  for (const mod of mods) {
+    const selected = new Set(mod.activeFolders)
+    for (const folder of [...mod.versionDirs, 'Common']) {
+      if (!selected.has(folder)) {
+        globs.push(`!${mod.assetPath}/${folder}/**`)
+      }
+    }
+    for (const file of mod.shadowedFiles) {
+      globs.push(`!${mod.assetPath}/${file}`)
+    }
+  }
+  return globs
+}
+
 export async function searchSource(
   sandbox: PathSandbox,
   query: string,
   caseSensitive: boolean = false,
   filePattern?: string,
+  options: SearchSourceOptions = {},
 ) {
-  const { output, exceededOutputLimit } = await searchSourceImpl(
+  const { output, exceededOutputLimit, guidance } = await searchSourceImpl(
     sandbox,
     query,
     caseSensitive,
     filePattern,
+    options,
   )
+
+  if (guidance) {
+    return textResponse(guidance)
+  }
 
   if (output.length === 0 && !exceededOutputLimit) {
     return textResponse(
@@ -110,6 +225,13 @@ export async function searchSource(
       '(Tip: Refine your search query or add a more specific `file_pattern`.)',
     )
     return textResponse(truncated.join('\n'))
+  }
+
+  if (options.loadedOnly && !(options.manifest !== undefined ? options.manifest : readManifest())) {
+    return textResponse(
+      output +
+        '\n\n[Note] No mods manifest found (import-mods never ran); loaded_only was ignored.',
+    )
   }
 
   return textResponse(output)

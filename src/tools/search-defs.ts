@@ -1,54 +1,49 @@
 import type { Database } from 'bun:sqlite'
-import type { DefsRow, SqlNamedParams } from '../types'
+import type { SqlNamedParams } from '../types'
 import { textResponse } from '../utils/mcp-response'
+import {
+  searchDefsEffective,
+  type DefSearchResultRow,
+} from '../repositories/defs-repo'
 
-type ResultRow = Pick<DefsRow, 'defName' | 'defType' | 'label'>
-type QueryRow = ResultRow & { total: number }
+export interface SearchDefsOptions {
+  query: string
+  defType?: string
+  mod?: string
+  limit?: number
+}
 
 export function searchDefsImpl(
   db: Database,
   query: string,
   defType?: string,
+  mod?: string,
   limit: number = 20,
-) {
-  let whereClause = '(defName LIKE $q OR label LIKE $q)'
-
-  const params: SqlNamedParams = { $q: `%${query}%`, $limit: limit }
-
-  if (defType) {
-    whereClause += ' AND defType = $type'
-    params.$type = defType
-  }
-
-  const sql = `
-    SELECT defName, defType, label, COUNT(*) OVER() AS total
-    FROM defs
-    WHERE ${whereClause}
-    LIMIT $limit
-  `
-  const rows = db.query<QueryRow, SqlNamedParams>(sql).all(params)
+): { results: DefSearchResultRow[]; total: number } {
+  const rows = searchDefsEffective(db, query, defType, mod, limit)
   const total = rows[0]?.total ?? 0
-  const results = rows.map(({ total: _, ...row }) => row)
-
-  return { results, total }
+  return { results: rows, total }
 }
 
 export function searchDefs(
   db: Database,
   query: string,
   defType?: string,
+  mod?: string,
   limit: number = 20,
 ) {
-  const { results, total } = searchDefsImpl(db, query, defType, limit)
+  const { results, total } = searchDefsImpl(db, query, defType, mod, limit)
 
   if (total === 0) {
     return textResponse('No results found. Try a shorter keyword.')
   }
 
+  // every line carries the owning [packageId]
   const formatted = results
     .map(r => {
       const labelStr = r.label ? ` (label: "${r.label}")` : ''
-      return `[${r.defType}] ${r.defName}${labelStr}`
+      const overridden = r.versions > 1 ? ` (+${r.versions - 1} overridden)` : ''
+      return `[${r.packageId}] [${r.defType}] ${r.defName}${labelStr}${overridden}`
     })
     .join('\n')
 

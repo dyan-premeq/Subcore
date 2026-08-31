@@ -1,0 +1,13 @@
+<Defs>
+  <ThingDef Name="AlphaRootBase" Abstract="True">
+    <label>alpha root base</label>
+  </ThingDef>
+  <ThingDef ParentName="AlphaRootBase">
+    <defName>AlphaRootDef</defName>
+    <label>alpha root def from ROOT folder</label>
+  </ThingDef>
+  <ThingDef>
+    <defName>AlphaOnlyRootDef</defName>
+    <label>only exists at root</label>
+  </ThingDef>
+</Defs>

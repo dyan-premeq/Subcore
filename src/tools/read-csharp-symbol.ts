@@ -3,6 +3,7 @@ import type { CsharpIndexRow, SqlNamedParams } from '../types'
 import { file } from 'bun'
 import { join } from 'node:path'
 import { textResponse } from '../utils/mcp-response'
+import { findCsharpTypes } from '../repositories/csharp-repo'
 
 type IndexRow = Pick<CsharpIndexRow, 'filePath' | 'startLine'>
 
@@ -114,12 +115,7 @@ export async function readCsharpSymbol(
 
 // #region Helpers
 function getCsharpIndexRows(db: Database, typeName: string): IndexRow[] {
-  return db
-    .query<
-      IndexRow,
-      SqlNamedParams
-    >('SELECT filePath, startLine FROM csharp_index WHERE typeName = $name')
-    .all({ $name: typeName })
+  return findCsharpTypes(db, typeName)
 }
 
 function extractNamedMethods(

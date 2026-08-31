@@ -1,0 +1,6 @@
+<Defs>
+  <ThingDef>
+    <defName>GammaBetaOnlyDef</defName>
+    <label>only when beta is active</label>
+  </ThingDef>
+</Defs>

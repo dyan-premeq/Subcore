@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>Alpha Tools</name>
+  <author>Tester</author>
+  <packageId>Alpha.Tools</packageId>
+  <supportedVersions>
+    <li>1.5</li>
+    <li>1.6</li>
+  </supportedVersions>
+  <modDependencies>
+    <li>
+      <packageId>beta.core</packageId>
+      <displayName>Beta Core</displayName>
+    </li>
+  </modDependencies>
+  <loadAfterByVersion>
+    <v1.5>
+      <li>beta.core</li>
+    </v1.5>
+    <v1.6>
+      <li>beta.core</li>
+    </v1.6>
+  </loadAfterByVersion>
+</ModMetaData>

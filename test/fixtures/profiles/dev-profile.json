@@ -1,0 +1,10 @@
+{
+  "name": "dev-profile",
+  "base": "all-dlc",
+  "mods": [
+    "gamma.conditional",
+    "alpha.tools",
+    "beta.core"
+  ],
+  "autoOrder": true
+}

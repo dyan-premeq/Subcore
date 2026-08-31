@@ -1,6 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import { PathSandbox } from '../utils/path-sandbox'
 import { textResponse } from '../utils/mcp-response'
+import { compareStrings } from '../utils/compare'
 
 interface DirectoryEntry {
   name: string
@@ -26,7 +27,7 @@ export async function listDirectoryImpl(
         return a.isDirectory() ? -1 : 1
       }
 
-      return a.name.localeCompare(b.name)
+      return compareStrings(a.name, b.name)
     })
 
   const total = files.length

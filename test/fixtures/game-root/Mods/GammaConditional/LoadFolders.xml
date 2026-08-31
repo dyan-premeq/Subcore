@@ -1,0 +1,12 @@
+<LoadFolders>
+  <v1.5>
+    <li>Old</li>
+  </v1.5>
+  <v1.6>
+    <li IfModActive="beta.core">BetaOnly</li>
+    <li>GammaBase</li>
+  </v1.6>
+  <default>
+    <li>Defaults</li>
+  </default>
+</LoadFolders>

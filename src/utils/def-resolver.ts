@@ -1,4 +1,5 @@
 import type { Def, XmlNode, XmlObject } from '../types'
+import { compareStrings } from './compare'
 
 export function processDefs(defs: Def[]): Def[] {
   const resolver = new DefResolver(defs)
@@ -22,22 +23,30 @@ class DefResolver {
     if (!def['@_ParentName']) return sortDefKeys(def)
 
     const parentResolved = this.resolveByName(def['@_ParentName'], new Set())
+    if (parentResolved === undefined) {
+      // game tolerance (XmlInheritance.GetBestParentFor): a missing parent is
+      // a logged error, not a crash — the def is deserialized as a root
+      console.warn(
+        `[def-resolver] parent "${def['@_ParentName']}" not found for def "${def.defName ?? '?'}"; treating as root`,
+      )
+      return sortDefKeys(def)
+    }
     const merged = mergeNodes(stripParentMeta(parentResolved), def) as Def
     return sortDefKeys(merged)
   }
 
-  private resolveByName(name: string, stack: Set<string>): Def {
-    if (this.memo.has(name)) return this.memo.get(name)!
+  private resolveByName(name: string, stack: Set<string>): Def | undefined {
+    if (this.memo.has(name)) return this.memo.get(name)
 
     if (stack.has(name)) {
-      throw new Error(
-        `Circular inheritance: ${Array.from(stack).join(' -> ')} -> ${name}`,
-      )
+      // cycle: keep the node unresolved instead of throwing (game tolerance)
+      console.warn(`[def-resolver] circular inheritance: ${Array.from(stack).join(' -> ')} -> ${name}`)
+      return undefined
     }
 
     const rawDef = this.defMap.get(name)
     if (!rawDef) {
-      throw new Error(`Parent definition "${name}" not found.`)
+      return undefined
     }
 
     const parentName = rawDef['@_ParentName']
@@ -46,7 +55,8 @@ class DefResolver {
     if (parentName) {
       const parentStack = new Set(stack).add(name)
       const parent = this.resolveByName(parentName, parentStack)
-      resolvedDef = mergeNodes(stripParentMeta(parent), rawDef) as Def
+      // missing/cyclic grandparent: fall back to the raw parent definition
+      resolvedDef = parent !== undefined ? (mergeNodes(stripParentMeta(parent), rawDef) as Def) : rawDef
     } else {
       resolvedDef = rawDef
     }
@@ -98,7 +108,7 @@ function sortDefKeys(def: Def): Def {
     if (idxA !== -1) return -1
     if (idxB !== -1) return 1
 
-    return a.localeCompare(b)
+    return compareStrings(a, b)
   })
 
   keys.forEach(key => (sorted[key] = def[key]))

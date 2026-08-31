@@ -9,6 +9,7 @@ import { listDirectory } from './tools/list-directory'
 import { getDefDetails } from './tools/get-def-details'
 import { searchDefs } from './tools/search-defs'
 import { readCsharpSymbol } from './tools/read-csharp-symbol'
+import { listMods } from './tools/list-mods'
 
 const name = 'rimsage'
 const version = '1.0.1'
@@ -36,10 +37,25 @@ function registerTools(server: McpServer) {
           .boolean()
           .default(false)
           .describe('Enforce exact case matching.'),
+        scope: z
+          .string()
+          .optional()
+          .describe(
+            "Restrict search: 'vanilla' (game Defs + decompiled Source), 'mods' (all imported mods), 'all' (default), or a packageId (e.g. 'mehni.pickupandhaul').",
+          ),
+        loaded_only: z
+          .boolean()
+          .default(false)
+          .describe(
+            'true = only files the game actually loads for the current version (skips old version folders and shadowed files). Default false searches everything.',
+          ),
       }),
     },
-    ({ query, file_pattern, case_sensitive }) =>
-      searchSource(sandbox, query, case_sensitive, file_pattern),
+    ({ query, file_pattern, case_sensitive, scope, loaded_only }) =>
+      searchSource(sandbox, query, case_sensitive, file_pattern, {
+        scope,
+        loadedOnly: loaded_only,
+      }),
   )
 
   // tool: read file
@@ -127,6 +143,10 @@ function registerTools(server: McpServer) {
           .string()
           .optional()
           .describe('Filter by type (e.g. "ThingDef", "JobDef").'),
+        mod: z
+          .string()
+          .optional()
+          .describe('Filter by owning mod packageId (e.g. "mehni.pickupandhaul").'),
         limit: z
           .number()
           .int()
@@ -136,7 +156,7 @@ function registerTools(server: McpServer) {
           .describe('Max results to return.'),
       }),
     },
-    ({ query, defType, limit }) => searchDefs(db, query, defType, limit),
+    ({ query, defType, mod, limit }) => searchDefs(db, query, defType, mod, limit),
   )
 
   // tool: read csharp symbol
@@ -158,5 +178,25 @@ function registerTools(server: McpServer) {
     },
     ({ typeName, memberName }) =>
       readCsharpSymbol(db, sourcePath, typeName, memberName),
+  )
+
+  // tool: list mods
+  server.registerTool(
+    'list_mods',
+    {
+      description:
+        'List indexed RimWorld mods: load order, packageId, name, source, dependency status and warnings.',
+      inputSchema: z.object({
+        inProfile: z
+          .boolean()
+          .optional()
+          .describe('true = only mods in the current dev profile.'),
+        playerActive: z
+          .boolean()
+          .optional()
+          .describe('true = only mods active in the player game config (diagnostic view).'),
+      }),
+    },
+    ({ inProfile, playerActive }) => listMods(db, { inProfile, playerActive }),
   )
 }

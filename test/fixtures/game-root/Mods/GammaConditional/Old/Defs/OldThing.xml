@@ -1,0 +1,6 @@
+<Defs>
+  <ThingDef>
+    <defName>GammaOldDef</defName>
+    <label>gamma 1.5-only</label>
+  </ThingDef>
+</Defs>

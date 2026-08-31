@@ -75,9 +75,52 @@ Most Agent clients support `mcp.json` configuration:
 
 **Replace** `/path/to/this/repo` with the actual path to this repository on your system.
 
+## Modded Environment Development
+
+RimSage can index mods on top of the vanilla game. 
+
+The dev-time mod set is declared in a **profile** (`rimsage.profile.json`), which is independent from the player's load order.
+
+1. Snapshot (or hand-write) a profile
+
+```sh
+# draft from the player's ModsConfig.xml (then trim it)
+bun run import:mods /path/to/game --from-game-config --out rimsage.profile.json
+```
+
+```jsonc
+// rimsage.profile.json
+{
+  "name": "my-compat-project",
+  "base": "all-dlc",           // 'core-only' | 'all-dlc'
+  "mods": [
+    "brrainz.harmony",
+    "oskarpotocki.vanillafactionsexpanded.core",
+    "mehni.pickupandhaul"
+  ],
+  "autoOrder": true            // topological sort by dependencies; false = keep array order
+}
+```
+
+2. Import mods into `dist/assets/Mods` (full structure, incl. version folders; `Textures`/`Sounds` are skipped).  Also produces `dist/mods-manifest.json` with load order + effective file sets.
+
+```sh
+bun run import:mods /path/to/game            # RIMSAGE_GAME_ROOT also works
+bun run import:mods /path/to/game --full     # force re-copy
+```
+
+3. Build and use
+
+```sh
+bun run build
+```
+
+New/changed tools: `list_mods`, `search_source` with `scope` ('vanilla' | 'mods' | 'all' | packageId) and `loaded_only`, `search_defs` with `mod` filter and `[packageId]` prefixes (always shown, also in vanilla-only builds).
+
 ## Development
 
 ```sh
 bun run start # stdio
 bun run start:http # Streamable HTTP
+bun test       # unit tests (fixtures under test/fixtures)
 ```

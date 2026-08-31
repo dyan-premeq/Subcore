@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>Gamma Conditional</name>
+  <author>Tester</author>
+  <packageId>gamma.conditional</packageId>
+  <supportedVersions>
+    <li>1.6</li>
+  </supportedVersions>
+  <modDependencies>
+    <li>
+      <packageId>alpha.tools</packageId>
+      <displayName>Alpha Tools</displayName>
+    </li>
+  </modDependencies>
+</ModMetaData>

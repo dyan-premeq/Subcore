@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { rebuildCsharpIndex } from '../../src/scripts/index-csharp'
+import { rmTemp } from '../helpers/fs'
 
 const tempDirs: string[] = []
 
@@ -17,7 +18,7 @@ async function makeTempDir() {
 describe('index-csharp script', () => {
   afterEach(async () => {
     for (const dir of tempDirs.splice(0)) {
-      await rm(dir, { force: true, recursive: true })
+      await rmTemp(dir)
     }
   })
 

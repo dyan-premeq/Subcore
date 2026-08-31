@@ -1,0 +1,1 @@
+<Patch><Operation Class="PatchOperationRemove"><xpath>Defs/ThingDef[defName="AlphaOnlyRootDef"]</xpath></Operation></Patch>
