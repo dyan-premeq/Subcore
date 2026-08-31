@@ -10,6 +10,7 @@ import { getDefDetails, defDetailsOutputSchema } from './tools/get-def-details'
 import { searchDefs, searchDefsOutputSchema } from './tools/search-defs'
 import { readCsharpSymbol } from './tools/read-csharp-symbol'
 import { listMods } from './tools/list-mods'
+import { searchPatches, searchPatchesOutputSchema } from './tools/search-patches'
 import pkg from '../package.json'
 
 const name = 'rimsage'
@@ -127,9 +128,11 @@ function registerTools(server: McpServer) {
           .optional()
           .describe('Type filter (e.g. `ThingDef`, `JobDef`).'),
         view: z
-          .enum(['merged', 'raw'])
+          .enum(['merged', 'raw', 'patched'])
           .default('merged')
-          .describe('merged = inheritance-resolved XML, raw = as authored.'),
+          .describe(
+            'merged = inheritance-resolved XML, raw = as authored, patched = after XML patch evaluation (what the game actually loads; falls back to merged when unavailable).',
+          ),
         mod: z
           .string()
           .optional()
@@ -227,5 +230,43 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true },
     },
     ({ inProfile, playerActive }) => listMods(db, { inProfile, playerActive }),
+  )
+
+  // tool: search patches
+  server.registerTool(
+    'search_patches',
+    {
+      description:
+        'Reverse-lookup XML patch operations: which mod, file and operation patched a def, mod, or op class. The entry point for writing compatibility patches.',
+      inputSchema: z.object({
+        defName: z
+          .string()
+          .optional()
+          .describe(
+            'Find patches targeting this defName (e.g. `Pawn`). Requires patch evaluation (not --skip-patches).',
+          ),
+        packageId: z
+          .string()
+          .optional()
+          .describe('Filter by patch-owning mod packageId (e.g. `mehni.pickupandhaul`).'),
+        opClass: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by operation class, case-insensitive (e.g. `PatchOperationReplace`).',
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .default(50)
+          .describe('Max results to return.'),
+      }),
+      outputSchema: searchPatchesOutputSchema,
+      annotations: { readOnlyHint: true },
+    },
+    ({ defName, packageId, opClass, limit }) =>
+      searchPatches(db, { defName, packageId, opClass, limit }),
   )
 }

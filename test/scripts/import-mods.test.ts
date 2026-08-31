@@ -93,13 +93,20 @@ describe('import-mods', () => {
     expect(second.copiedFiles).toBe(0)
     expect(second.copiedFiles).toBeLessThanOrEqual(first.copiedFiles)
 
-    // touch a source file -> exactly that file is recopied with --full skipped
+    // touch a source file -> exactly that file is recopied with --full
+    // skipped; the fixture is restored afterwards so tests never pollute git
     const target = join(gameRoot, 'Mods/BetaCore/Defs/BetaThing.xml')
-    const prev = await write(target, (await Bun.file(target).text()) + '\n')
-    void prev
-    utimesSync(target, new Date(), new Date(Date.now() + 1000))
-    const third = await run()
-    expect(third.copiedFiles).toBe(1)
+    const original = await Bun.file(target).text()
+    try {
+      const prev = await write(target, original + '\n')
+      void prev
+      utimesSync(target, new Date(), new Date(Date.now() + 1000))
+      const third = await run()
+      expect(third.copiedFiles).toBe(1)
+    } finally {
+      await write(target, original)
+      utimesSync(target, new Date(), new Date(Date.now() - 1000))
+    }
   })
 
   test('index-mods builds the mods table from the manifest', async () => {

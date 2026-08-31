@@ -1,8 +1,6 @@
-import { existsSync, readdirSync } from 'node:fs'
-import { file, Glob } from 'bun'
+import { file } from 'bun'
 import { Database } from 'bun:sqlite'
-import { join, sep } from 'node:path'
-import type { Def, ModsManifest } from '../types'
+import type { Def } from '../types'
 import { defsPath, indexDbPath, modsAssetPath, modsManifestPath } from '../utils/env'
 import { parser } from '../utils/xml-utils'
 import {
@@ -18,22 +16,13 @@ import {
 } from '../repositories/defs-repo'
 import {
   countMods,
-  getModByDataCategory,
-  getModByPackageId,
   listInProfilePackageIds,
 } from '../repositories/mods-repo'
 import { readManifest } from '../utils/manifest'
-import { escapePackageDirName } from '../utils/mod-discovery'
+import { scanModFiles, scanVanillaFiles, type AssetFileRef } from '../utils/asset-scan'
 import { compareStrings } from '../utils/compare'
 
-interface DefFileRef {
-  /** absolute path to read */
-  absPath: string
-  /** dist/assets-relative path (aligns with rg output) */
-  filePath: string
-  modId: number
-  loadOrder: number
-}
+type DefFileRef = AssetFileRef
 
 interface FlatDef {
   def: Def
@@ -67,8 +56,8 @@ export async function rebuildDefsIndex(
     const activePackageIds = new Set(listInProfilePackageIds(db))
     const manifest = readManifest(manifestPath)
     const refs: DefFileRef[] = []
-    refs.push(...(await scanVanillaDefs(db, defsSourcePath)))
-    refs.push(...scanModDefs(db, modsSourcePath, manifest))
+    refs.push(...(await scanVanillaFiles(db, defsSourcePath, 'Defs')))
+    refs.push(...scanModFiles(db, modsSourcePath, manifest, 'Defs'))
     console.log(`Collected ${refs.length} def files.`)
 
     // 3. parse & flatten (MayRequire-unsatisfied defs are not loaded by the
@@ -130,6 +119,9 @@ export async function rebuildDefsIndex(
     // 5. write (all versions kept; effective = highest loadOrder)
     console.log('Writing defs to db...')
     db.run('DELETE FROM defs')
+    // patched_defs was evaluated against the old tree — drop it rather than
+    // serve stale payloads (the patched view falls back to merged when empty)
+    db.run('DELETE FROM patched_defs')
 
     const rows: DefInsertRow[] = []
     // same-mod duplicate (defName, defType): the game logs an error and keeps
@@ -177,91 +169,7 @@ export async function rebuildDefsIndex(
   }
 }
 
-// #region Scanners
-
-async function scanVanillaDefs(db: Database, defsSourcePath: string): Promise<DefFileRef[]> {
-  if (!existsSync(defsSourcePath)) return []
-
-  const glob = new Glob('**/*.xml')
-  const out: DefFileRef[] = []
-
-  for await (const relativePath of glob.scan({ cwd: defsSourcePath })) {
-    const parts = relativePath.split(sep)
-    if (parts.length < 2) {
-      // import-defs always writes Data/<category>/... — a root-level file here
-      // means a corrupted dist layout, not "Core"
-      console.warn(`Skipping ${relativePath}: no category folder (run import-defs).`)
-      continue
-    }
-    const category = parts[0]
-    const mod = getModByDataCategory(db, category)
-    if (!mod) {
-      console.warn(`No mod row for vanilla category "${category}"; skipping ${relativePath}`)
-      continue
-    }
-    out.push({
-      absPath: join(defsSourcePath, relativePath),
-      filePath: toPosix(relativePath),
-      modId: mod.modId,
-      loadOrder: mod.loadOrder,
-    })
-  }
-
-  console.log(`Vanilla def files: ${out.length}`)
-  return out
-}
-
-function scanModDefs(
-  db: Database,
-  modsSourcePath: string,
-  manifest: ModsManifest | null,
-): DefFileRef[] {
-  if (!existsSync(modsSourcePath)) return []
-
-  const out: DefFileRef[] = []
-
-  const modDirs = readdirSync(modsSourcePath, { withFileTypes: true })
-    .filter(e => e.isDirectory())
-    .map(e => e.name)
-
-  for (const dirName of modDirs) {
-    const manifestMod = manifest?.mods.find(
-      m => m.assetPath === `Mods/${dirName}` || escapePackageDirName(m.packageId) === dirName,
-    )
-    if (!manifestMod) {
-      console.warn(
-        `[warn] no manifest entry for dist mod dir "${dirName}" (run import-mods); skipping.`,
-      )
-      continue
-    }
-
-    const modRow = getModByPackageId(db, manifestMod.packageId)
-    if (!modRow) {
-      console.warn(
-        `No mod row for "${manifestMod.packageId}" (run index-mods first); skipping.`,
-      )
-      continue
-    }
-
-    // effective file set from the manifest — the single source of truth for
-    // what the game actually loads (version-folder / LoadFolders shadowing
-    // was already resolved by import-mods)
-    for (const rel of manifestMod.effectiveFiles) {
-      const posix = toPosix(rel)
-      // only Defs/ folders produce defs (Patches are M3's patch_ops)
-      if (!/(^|\/)Defs\//.test(posix)) continue
-      out.push({
-        absPath: join(modsSourcePath, dirName, rel),
-        filePath: `Mods/${dirName}/${posix}`,
-        modId: modRow.modId,
-        loadOrder: modRow.loadOrder,
-      })
-    }
-  }
-
-  console.log(`Mod def files: ${out.length}`)
-  return out
-}
+// #region Scanners — see utils/asset-scan.ts (shared with index-patches)
 
 // #endregion
 
@@ -269,10 +177,6 @@ function scanModDefs(
 function rawOf(def: Def): Def {
   const { defType: _t, ...rest } = def
   return rest as Def
-}
-
-function toPosix(path: string): string {
-  return path.split(sep).join('/')
 }
 
 if (import.meta.main) {

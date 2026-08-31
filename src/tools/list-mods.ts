@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import type { ModDependency, ModsRow } from '../types'
 import { textResponse } from '../utils/mcp-response'
 import { listMods as listModsRows } from '../repositories/mods-repo'
+import { parseJsonArray } from '../utils/json'
 
 export interface ListModsFilter {
   inProfile?: boolean
@@ -58,14 +59,14 @@ function formatMod(row: ModsRow, indexedIds: Set<string>): string {
   const deps = dependencyStatus(row.dependencies, indexedIds)
   if (deps) tags.push(deps)
 
-  const versions = parseJsonArray(row.supportedVersions)
+  const versions = parseJsonArray(row.supportedVersions ?? '[]', String)
   if (versions.length > 0) {
     tags.push(`v${versions.slice(0, 3).join(', v')}${versions.length > 3 ? '+…' : ''}`)
   }
 
   parts.push(`(${tags.join('; ')})`)
 
-  const warnings = parseJsonArray(row.warnings)
+  const warnings = parseJsonArray(row.warnings ?? '[]', String)
   if (warnings.length > 0) {
     parts.push(`warnings(${warnings.length}): ${warnings.slice(0, 2).join(' | ')}`)
     if (warnings.length > 2) parts.push(`  … +${warnings.length - 2} more`)
@@ -91,16 +92,6 @@ function parseDependencies(json: string | null): ModDependency[] {
   try {
     const parsed = JSON.parse(json)
     return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function parseJsonArray(json: string | null): string[] {
-  if (!json) return []
-  try {
-    const parsed = JSON.parse(json)
-    return Array.isArray(parsed) ? parsed.map(String) : []
   } catch {
     return []
   }

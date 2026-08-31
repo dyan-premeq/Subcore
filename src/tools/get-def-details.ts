@@ -8,8 +8,10 @@ import {
   type DefDetailResultRow,
   type DefLineageRow,
 } from '../repositories/defs-repo'
+import { getPatchedDefs, getPackageIdMap } from '../repositories/patches-repo'
+import { parseJsonArray } from '../utils/json'
 
-export type DefDetailsView = 'merged' | 'raw'
+export type DefDetailsView = 'merged' | 'raw' | 'patched'
 
 export interface GetDefDetailsOptions {
   view?: DefDetailsView
@@ -30,6 +32,7 @@ export const defDetailsOutputSchema = z.object({
       loadOrder: z.number(),
       filePath: z.string().nullable(),
       xml: z.string(),
+      patchedBy: z.array(z.string()).optional(),
     }),
   ),
 })
@@ -48,6 +51,10 @@ export function getDefDetails(
   options: GetDefDetailsOptions = {},
 ): GetDefDetailsResponse {
   const { view = 'merged', mod, dup = 'effective' } = options
+
+  if (view === 'patched') {
+    return getPatchedView(db, defName, defType)
+  }
 
   const rows = getDefDetailsRows(db, defName, defType, { view, mod, dup })
 
@@ -127,3 +134,75 @@ function formatLineage(rows: DefLineageRow[]): string {
   parts.push(`effective: ${effective.packageId}`)
   return `Lineage: ${parts.join(' → ')}`
 }
+
+/**
+ * view=patched: the def as the game actually loads it — patches applied, then
+ * inheritance re-resolved. Falls back to the merged view (with a note) when
+ * the patched_defs table has no row (def unpatched, MayRequire-pruned, or
+ * the index was built with --skip-patches).
+ */
+function getPatchedView(
+  db: Database,
+  defName: string,
+  defType?: string,
+): GetDefDetailsResponse {
+  const patched = getPatchedDefs(db, defName, defType)
+
+  if (patched.length === 0) {
+    const fallback = getDefDetails(db, defName, defType, { view: 'merged' })
+    if (fallback.isError) return fallback
+    return {
+      ...fallback,
+      ...textResponse(
+        `Patched view has no row for \`${defName}\`${
+          defType ? ` (${defType})` : ''
+        } (unpatched, MayRequire-pruned, or built with --skip-patches) — showing the merged view instead:\n\n${
+          fallback.content[0]!.text
+        }`,
+      ),
+    }
+  }
+
+  const packageIds = getPackageIdMap(db)
+  const lineage = getDefLineage(db, defName, defType)
+  const lineageText = formatLineage(lineage)
+
+  const sections: string[] = []
+  if (lineageText) sections.push(lineageText)
+
+  const defs: DefDetailsStructured['defs'] = []
+  for (const row of patched) {
+    const changedBy = parseJsonArray(row.changedBy, Number).map(
+      modId => packageIds.get(modId) ?? `modId:${modId}`,
+    )
+    const changedText =
+      changedBy.length > 0
+        ? `Patched by: ${[...new Set(changedBy)].join(', ')}`
+        : 'Patched by: (no evaluated patch touched this def)'
+    const xml = xmlOfPayload(row.payload, row.defType)
+    sections.push(`${changedText}\n${xml}`)
+    defs.push({
+      defType: row.defType,
+      packageId: lineage.at(-1)?.packageId ?? 'patches',
+      loadOrder: lineage.at(-1)?.loadOrder ?? -1,
+      filePath: lineage.at(-1)?.filePath ?? null,
+      xml,
+      patchedBy: [...new Set(changedBy)],
+    })
+  }
+
+  return {
+    ...textResponse(sections.join('\n\n')),
+    structuredContent: {
+      lineage: lineage.map(({ packageId, loadOrder }) => ({ packageId, loadOrder })),
+      defs,
+    },
+  }
+}
+
+function xmlOfPayload(payload: string, defType: string): string {
+  const obj = JSON.parse(payload)
+  delete obj.defType
+  return builder.build({ [defType]: obj })
+}
+

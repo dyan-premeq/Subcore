@@ -1,6 +1,6 @@
 import { argv, file, write, Glob } from 'bun'
 import { resolve, join, sep } from 'node:path'
-import { versionPath, defsPath } from '../utils/env'
+import { versionPath, defsPath, patchesPath } from '../utils/env'
 
 const path = argv.at(2)
 
@@ -30,6 +30,20 @@ for await (const relativePath of glob.scan({ cwd: root, onlyFiles: true })) {
   const category = parts[1]
   const defRelativePath = parts.slice(3).join(sep)
   const output = join(defsPath, category, defRelativePath)
+  const source = file(join(root, relativePath))
+
+  await write(output, source)
+}
+
+// official DLC ship PatchOperations too (Biotech/Ideology/Odyssey/Royalty);
+// they run against the unified XML exactly like mod patches (§4.5)
+const patchGlob = new Glob('Data/*/Patches/**/*.xml')
+
+for await (const relativePath of patchGlob.scan({ cwd: root, onlyFiles: true })) {
+  const parts = relativePath.split(sep)
+  const category = parts[1]
+  const patchRelativePath = parts.slice(3).join(sep)
+  const output = join(patchesPath, category, patchRelativePath)
   const source = file(join(root, relativePath))
 
   await write(output, source)

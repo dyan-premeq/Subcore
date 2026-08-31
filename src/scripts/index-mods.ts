@@ -34,6 +34,9 @@ export async function rebuildModsIndex(
   try {
     ensureSchema(db)
     db.run('DELETE FROM mods')
+    // patched_defs.changedBy holds modIds from the old mods table — drop it
+    // rather than serve stale payloads (patched view falls back to merged)
+    db.run('DELETE FROM patched_defs')
 
     if (manifest) {
       insertFromManifest(db, manifest)

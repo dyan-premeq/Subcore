@@ -107,3 +107,16 @@ export function listInProfilePackageIds(db: Database): string[] {
     .all({})
     .map(row => row.packageId)
 }
+
+/**
+ * Display names of profile-active mods: the PatchOperationFindMod match set
+ * (game: ModLister.HasActiveModWithName — exact, case-sensitive).
+ */
+export function listInProfileModNames(db: Database): string[] {
+  return db
+    .query<{ name: string | null }, SqlNamedParams>(
+      'SELECT name FROM mods WHERE inProfile = 1 AND name IS NOT NULL',
+    )
+    .all({})
+    .map(row => row.name!)
+}

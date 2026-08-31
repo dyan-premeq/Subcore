@@ -4,6 +4,7 @@ import { getDefDetails } from '../../src/tools/get-def-details'
 import { ensureSchema } from '../../src/db/schema'
 import { replaceMods } from '../../src/repositories/mods-repo'
 import { replaceDefs } from '../../src/repositories/defs-repo'
+import { replacePatchedDefs } from '../../src/repositories/patches-repo'
 
 let db: Database
 
@@ -86,6 +87,52 @@ beforeAll(() => {
 })
 
 afterAll(() => db.close())
+
+describe('get-def-details: view=patched', () => {
+  test('renders the patched payload with its Patched by line', () => {
+    replacePatchedDefs(db, [
+      {
+        defName: 'TestGun',
+        defType: 'ThingDef',
+        payload: JSON.stringify({
+          defType: 'ThingDef',
+          defName: 'TestGun',
+          label: 'patched gun',
+          comps: { li: [{ compClass: 'X' }] },
+        }),
+        changedBy: [2],
+      },
+    ])
+
+    const result = getDefDetails(db, 'TestGun', 'ThingDef', { view: 'patched' })
+    const text = result.content[0].text as string
+
+    expect(text).toContain('Lineage: defined by ludeon.rimworld → effective: beta.mod')
+    expect(text).toContain('Patched by: beta.mod')
+    expect(text).toContain('<label>patched gun</label>')
+    expect(text).toContain('<compClass>X</compClass>')
+
+    expect(result.structuredContent!.defs[0]).toMatchObject({
+      packageId: 'beta.mod',
+      patchedBy: ['beta.mod'],
+    })
+  })
+
+  test('falls back to the merged view with an explanation when no patched row exists', () => {
+    const result = getDefDetails(db, 'SharedName', 'BodyDef', { view: 'patched' })
+    const text = result.content[0].text as string
+
+    expect(text).toContain('Patched view has no row')
+    expect(text).toContain('showing the merged view instead')
+    // merged payload still rendered
+    expect(text).toContain('<defName>SharedName</defName>')
+  })
+
+  test('unknown defs in patched view still error out', () => {
+    const result = getDefDetails(db, 'MissingDef', 'ThingDef', { view: 'patched' })
+    expect(result.isError).toBe(true)
+  })
+})
 
 describe('get-def-details', () => {
   test('returns an MCP error when the Def is missing', () => {

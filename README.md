@@ -115,7 +115,9 @@ bun run import:mods /path/to/game --full     # force re-copy
 bun run build
 ```
 
-New/changed tools: `list_mods`, `search_source` with `scope` ('vanilla' | 'mods' | 'all' | packageId) and `loaded_only`, `search_defs` with `mod` filter and `dup` ('effective' = load-order winner only, default; 'all' = every mod version), `get_def_details` with `view` ('merged' | 'raw'), `dup` and `mod` params plus a **Lineage** header (`defined by … → overridden by … → effective: …`) on every result.
+New/changed tools: `list_mods`, `search_source` with `scope` ('vanilla' | 'mods' | 'all' | packageId) and `loaded_only`, `search_defs` with `mod` filter and `dup` ('effective' = load-order winner only, default; 'all' = every mod version), `get_def_details` with `view` ('merged' | 'raw' | 'patched'), `dup` and `mod` params plus a **Lineage** header (`defined by … → overridden by … → effective: …`) on every result, and `search_patches` — the reverse lookup over evaluated XML patch operations (`defName` / `packageId` / `opClass`), the entry point for writing compatibility patches.
+
+The **patched view** replays every PatchOperation in game order (fontoxpath over a unified `Defs` tree, then inheritance re-resolution — patches run *before* inheritance, exactly like `LoadedModManager`), so `get_def_details(view='patched')` shows what the game actually loads, with a `Patched by:` provenance line. Abstract templates hit by patches are backfilled into `targetDefs` by `@Name`; changes flow into inheriting defs via the patched tree.
 
 Def semantics follow the game's `XmlInheritance` for the current game version: parent selection by load order, missing parents / cycles degrade instead of failing the build, `MayRequire` / `MayRequireAnyOf` defs are skipped unless the referenced packageId is in the profile (case-insensitive, `|postfix` ignored). The `@Name` inheritance registry is queryable in `dist/index.db` (`def_names` table, one row per `@Name` registration per mod).
 
@@ -125,4 +127,6 @@ Def semantics follow the game's `XmlInheritance` for the current game version: p
 bun run start # stdio
 bun run start:http # Streamable HTTP
 bun test       # unit tests (fixtures under test/fixtures)
+bun run regression:patches            # patch evaluation report over the index
+bun run regression:patches --workshop # static scan of every patch XML on disk (RIMSAGE_GAME_ROOT / RIMSAGE_WORKSHOP_ROOT)
 ```
