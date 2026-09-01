@@ -1,16 +1,26 @@
 import type { Database } from 'bun:sqlite'
-import type { CsharpIndexRow, SqlNamedParams } from '../types'
+import type { SqlNamedParams } from '../types'
 
 export interface CsharpInsertRow {
   typeName: string
   filePath: string
+  /** dist/assets-relative posix path ('Source/...', 'Mods/<pkg>/...') */
   startLine: number
+  modId: number | null
+}
+
+export interface CsharpSearchRow {
+  typeName: string
+  filePath: string
+  startLine: number
+  modId: number | null
+  packageId: string | null
 }
 
 export function replaceCsharpIndex(db: Database, rows: CsharpInsertRow[]): void {
   const insert = db.prepare(`
-    INSERT OR REPLACE INTO csharp_index (typeName, filePath, startLine)
-    VALUES ($typeName, $filePath, $startLine)
+    INSERT OR REPLACE INTO csharp_index (typeName, filePath, startLine, modId)
+    VALUES ($typeName, $filePath, $startLine, $modId)
   `)
 
   db.transaction((all: CsharpInsertRow[]) => {
@@ -19,15 +29,34 @@ export function replaceCsharpIndex(db: Database, rows: CsharpInsertRow[]): void 
         $typeName: row.typeName,
         $filePath: row.filePath,
         $startLine: row.startLine,
+        $modId: row.modId,
       })
     }
   })(rows)
 }
 
-export function findCsharpTypes(db: Database, typeName: string): CsharpIndexRow[] {
+export function findCsharpTypes(
+  db: Database,
+  typeName: string,
+  filePath?: string,
+): CsharpSearchRow[] {
+  const clauses = ['c.typeName = $typeName']
+  const params: SqlNamedParams = { $typeName: typeName }
+
+  if (filePath !== undefined) {
+    clauses.push('c.filePath = $filePath')
+    params.$filePath = filePath
+  }
+
   return db
-    .query<CsharpIndexRow, SqlNamedParams>(
-      'SELECT typeName, filePath, startLine FROM csharp_index WHERE typeName = $typeName ORDER BY filePath',
+    .query<CsharpSearchRow, SqlNamedParams>(
+      `
+      SELECT c.typeName, c.filePath, c.startLine, c.modId, m.packageId
+      FROM csharp_index c
+      LEFT JOIN mods m ON m.modId = c.modId
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY c.filePath
+    `,
     )
-    .all({ $typeName: typeName })
+    .all(params)
 }

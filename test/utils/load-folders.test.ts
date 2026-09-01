@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import type { ModInfo } from '../../src/types'
 import {
+  computeEffectiveAssemblies,
   computeEffectiveFiles,
   selectLoadFolders,
   shouldLoadFolder,
@@ -116,5 +117,24 @@ describe('load-folders', () => {
     // "._" prefixed files are skipped entirely
     expect(result.effective.every(f => !f.includes('._'))).toBe(true)
     expect(result.shadowed.every(f => !f.includes('._'))).toBe(true)
+  })
+
+  test('assemblies: first folder wins per key, scanned recursively, no dotfile filter (game parity)', () => {
+    const alphaRoot = join(gameRoot, 'Mods/AlphaTools')
+    const alpha = computeEffectiveAssemblies(alphaRoot, ['1.6', '.'])
+
+    // 1.6/Assemblies/Alpha.dll shadows the root copy
+    expect(alpha).toContain('1.6/Assemblies/Alpha.dll')
+    expect(alpha).not.toContain('Assemblies/Alpha.dll')
+
+    // root-only dll stays effective (even 0Harmony.dll — the skip is a decompile concern, not a scan concern)
+    expect(alpha).toContain('Assemblies/0Harmony.dll')
+
+    const betaRoot = join(gameRoot, 'Mods/BetaCore')
+    const beta = computeEffectiveAssemblies(betaRoot, ['.'])
+
+    // recursive scan (ModContentPack: SearchOption.AllDirectories)
+    expect(beta).toContain('Assemblies/Beta.dll')
+    expect(beta).toContain('Assemblies/Sub/Nested.dll')
   })
 })

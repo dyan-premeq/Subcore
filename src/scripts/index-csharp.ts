@@ -1,83 +1,117 @@
-import type { CsharpIndexRow, SqlNamedParams } from '../types'
 import { file, Glob } from 'bun'
 import { Database } from 'bun:sqlite'
 import { join } from 'node:path'
-import { indexDbPath, sourcePath } from '../utils/env'
+import { assetsPath, indexDbPath } from '../utils/env'
 import { ensureSchema } from '../db/schema'
-import { replaceCsharpIndex } from '../repositories/csharp-repo'
-
-interface CsharpIndexInsertRow {
-  $typeName: CsharpIndexRow['typeName']
-  $filePath: CsharpIndexRow['filePath']
-  $startLine: CsharpIndexRow['startLine']
-}
-
-type CsharpIndexInsertParams = SqlNamedParams & CsharpIndexInsertRow
+import { replaceCsharpIndex, type CsharpInsertRow } from '../repositories/csharp-repo'
+import { replaceHarmonyPatches, type HarmonyInsertRow } from '../repositories/harmony-repo'
+import { extractHarmonyPatches } from '../utils/harmony-parse'
 
 const typeRegex =
   /^\s*(?:public|private|protected|internal|abstract|sealed|static|partial|readonly|unsafe|\s)*\s+(?:class|struct|interface|enum)\s+([a-zA-Z0-9_]+)/
 
+// scan roots: the vanilla decompile plus every imported mod's root Source/
+// and decompiled assemblies. Old version folders stay unindexed (reference
+// corpus only, design doc §5.2).
+const SCAN_PATTERNS = [
+  'Source/**/*.cs',
+  'Mods/*/Source/**/*.cs',
+  'Mods/*/Source-decompiled/**/*.cs',
+]
+
+/**
+ * Rebuilds csharp_index (types) and harmony_patches (static Harmony parse)
+ * from dist/assets. filePath is stored relative to dist/assets.
+ */
 export async function rebuildCsharpIndex(
   dbPath = indexDbPath,
-  csharpSourcePath = sourcePath,
+  assetsRoot = assetsPath,
 ) {
-  console.log(`Scanning C# source in: ${csharpSourcePath}`)
+  console.log(`Scanning C# source in: ${assetsRoot}`)
 
   const db = new Database(dbPath)
 
   try {
     ensureSchema(db)
 
-    db.run('DELETE FROM csharp_index')
+    const modIdByDir = loadModIdByDir(db)
 
-    const glob = new Glob('**/*.cs')
+    db.run('DELETE FROM csharp_index')
+    db.run('DELETE FROM harmony_patches')
 
     let fileCount = 0
     let typeCount = 0
-    const batch: CsharpIndexInsertParams[] = []
+    const typeRows: CsharpInsertRow[] = []
+    const harmonyRows: HarmonyInsertRow[] = []
 
-    for await (const relativePath of glob.scan({
-      cwd: csharpSourcePath,
-      onlyFiles: true,
-    })) {
-      fileCount += 1
+    for (const pattern of SCAN_PATTERNS) {
+      for await (const entry of new Glob(pattern).scan({
+        cwd: assetsRoot,
+        onlyFiles: true,
+      })) {
+        const relativePath = entry.replaceAll('\\', '/')
+        const modId = modIdForPath(relativePath, modIdByDir)
+        fileCount += 1
 
-      const absolutePath = join(csharpSourcePath, relativePath)
-      // A partial index is invalid, so source read errors must abort the rebuild.
-      const content = await file(absolutePath).text()
-      const lines = content.split(/\r?\n/)
+        // A partial index is invalid, so source read errors must abort the rebuild.
+        const content = await file(join(assetsRoot, relativePath)).text()
 
-      const normalizedPath = relativePath.replaceAll('\\', '/')
-
-      lines.forEach((line, index) => {
-        const match = line.match(typeRegex)
-        if (match) {
-          const typeName = match[1]
-
-          batch.push({
-            $typeName: typeName,
-            $filePath: normalizedPath,
-            $startLine: index, // 0-indexed
-          })
-          typeCount++
+        const patches = extractHarmonyPatches(content)
+        for (const patch of patches) {
+          harmonyRows.push({ ...patch, modId, filePath: relativePath })
         }
-      })
+
+        const lines = content.split(/\r?\n/)
+        lines.forEach((line, index) => {
+          const match = line.match(typeRegex)
+          if (match) {
+            typeRows.push({
+              typeName: match[1],
+              filePath: relativePath,
+              startLine: index, // 0-indexed
+              modId,
+            })
+            typeCount++
+          }
+        })
+      }
     }
 
-    console.log(`Found ${fileCount} files. Writing ${typeCount} types to DB...`)
-
-    replaceCsharpIndex(
-      db,
-      batch.map(entry => ({
-        typeName: entry.$typeName as string,
-        filePath: entry.$filePath as string,
-        startLine: entry.$startLine as number,
-      })),
+    console.log(
+      `Found ${fileCount} files / ${typeCount} types / ${harmonyRows.length} harmony patches. Writing to DB...`,
     )
+
+    replaceCsharpIndex(db, typeRows)
+    replaceHarmonyPatches(db, harmonyRows)
     console.log(`Indexing complete.`)
   } finally {
     db.close()
   }
+}
+
+/** Mods/<dir> → modId from the mods table (community mods only). */
+function loadModIdByDir(db: Database): Map<string, number> {
+  const rows = db
+    .query<{ modId: number; assetPath: string }, []>(
+      "SELECT modId, assetPath FROM mods WHERE assetPath LIKE 'Mods/%'",
+    )
+    .all()
+  return new Map(rows.map(row => [row.assetPath.slice('Mods/'.length), row.modId]))
+}
+
+function modIdForPath(
+  relativePath: string,
+  modIdByDir: Map<string, number>,
+): number | null {
+  if (!relativePath.startsWith('Mods/')) return null
+  const dir = relativePath.split('/')[1]
+  const modId = modIdByDir.get(dir)
+  if (modId === undefined) {
+    throw new Error(
+      `C# file under unknown mod dir '${dir}' — run "bun run index:mods" first: ${relativePath}`,
+    )
+  }
+  return modId
 }
 
 if (import.meta.main) {

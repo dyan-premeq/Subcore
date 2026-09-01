@@ -23,9 +23,11 @@ import {
 } from '../utils/profile'
 import { resolveProfileOrder } from '../utils/load-order'
 import {
+  computeEffectiveAssemblies,
   computeEffectiveFiles,
   selectLoadFolders,
 } from '../utils/load-folders'
+import { decompileAssemblies, findIlspycmd } from '../utils/decompile'
 
 /** Top-level directories copied into dist; version folders recurse by rule. */
 const COPY_DIRS = new Set(['About', 'Defs', 'Patches', 'Source', 'Assemblies', 'Languages'])
@@ -107,6 +109,13 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
   let skippedFiles = 0
   const profilePackages = new Set(resolved.ordered.map(mod => mod.packageId))
 
+  const ilspyCmd = findIlspycmd()
+  if (!ilspyCmd) {
+    console.warn(
+      '[decompile] ilspycmd not found — mod Assemblies will not be decompiled (optional; dotnet tool install -g ilspycmd).',
+    )
+  }
+
   const manifestMods = []
   for (let index = 0; index < resolved.ordered.length; index++) {
     const mod = resolved.ordered[index]
@@ -129,6 +138,16 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
       const effective = computeEffectiveFiles(mod.rootPath, activeFolders)
       effectiveFiles = effective.effective
       shadowedFiles = effective.shadowed
+
+      if (ilspyCmd) {
+        const assemblies = computeEffectiveAssemblies(mod.rootPath, activeFolders)
+        const stats = decompileAssemblies(ilspyCmd, assemblies, destRoot, full)
+        if (stats.decompiled + stats.failed > 0) {
+          console.log(
+            `[decompile] ${mod.packageId}: ${stats.decompiled} assemblies decompiled, ${stats.skipped} skipped, ${stats.failed} failed.`,
+          )
+        }
+      }
     }
 
     manifestMods.push({
@@ -331,9 +350,9 @@ if (import.meta.main) {
     process.exit(1)
   }
 
-  const gameVersion =
-    process.env.RIMSAGE_GAME_VERSION ??
-    parseVersionTxt(readFileSync(join(gameRoot, 'Version.txt'), 'utf8'))
+  const gameVersion = parseVersionTxt(
+    readFileSync(join(gameRoot, 'Version.txt'), 'utf8'),
+  )
 
   if (!gameVersion) {
     console.error(

@@ -5,20 +5,33 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readCsharpSymbol } from '../../src/tools/read-csharp-symbol'
+import { ensureSchema } from '../../src/db/schema'
+import { replaceMods, type ModInsertRow } from '../../src/repositories/mods-repo'
 
 let db: Database
 let sourcePath: string
 
+const modRow: ModInsertRow = {
+  packageId: 'test.mod',
+  name: 'test.mod',
+  author: null,
+  source: 'workshop',
+  rootPath: '',
+  assetPath: 'Mods/test.mod',
+  loadOrder: 1,
+  inProfile: true,
+  playerActive: false,
+  activeFolders: null,
+  warnings: [],
+  supportedVersions: ['1.6'],
+  dependencies: [],
+  dataCategory: null,
+}
+
 beforeAll(async () => {
   db = new Database(':memory:')
-  db.run(`
-    CREATE TABLE csharp_index (
-      typeName TEXT,
-      filePath TEXT,
-      startLine INTEGER,
-      PRIMARY KEY (typeName, filePath)
-    )
-  `)
+  ensureSchema(db)
+  replaceMods(db, [modRow])
 
   sourcePath = await mkdtemp(join(tmpdir(), 'rimsage-symbols-'))
   await mkdir(join(sourcePath, 'One'))
@@ -26,7 +39,7 @@ beforeAll(async () => {
 
   const sources = new Map([
     [
-      'Thing.cs',
+      'Source/Thing.cs',
       `public class Thing
 {
     public virtual void ExposeData()
@@ -36,16 +49,17 @@ beforeAll(async () => {
 }`,
     ],
     [
-      'Alert.cs',
+      'Source/Alert.cs',
       `public abstract class Alert
 {
     public abstract AlertReport GetReport();
 }`,
     ],
-    ['One/Option.cs', 'public class Option\n{\n}'],
-    ['Two/Option.cs', 'public class Option\n{\n}'],
+    ['Source/One/Option.cs', 'public class Option\n{\n}'],
+    ['Source/Two/Option.cs', 'public class Option\n{\n}'],
+    ['Mods/test.mod/Source/Option.cs', 'public class Option\n{\n}'],
     [
-      'LargeType.cs',
+      'Source/LargeType.cs',
       `public class LargeType
 {
 ${Array.from({ length: 400 }, (_, index) => `    public int Field${index};`).join('\n')}
@@ -54,8 +68,8 @@ ${Array.from({ length: 400 }, (_, index) => `    public int Field${index};`).joi
   ])
 
   const insert = db.prepare(`
-    INSERT INTO csharp_index (typeName, filePath, startLine)
-    VALUES ($typeName, $filePath, 0)
+    INSERT INTO csharp_index (typeName, filePath, startLine, modId)
+    VALUES ($typeName, $filePath, 0, $modId)
   `)
 
   for (const [filePath, content] of sources) {
@@ -63,6 +77,7 @@ ${Array.from({ length: 400 }, (_, index) => `    public int Field${index};`).joi
     insert.run({
       $typeName: filePath.split('/').at(-1)!.replace('.cs', ''),
       $filePath: filePath,
+      $modId: filePath.startsWith('Mods/') ? 1 : null,
     })
   }
 })
@@ -77,7 +92,7 @@ describe('read-csharp-symbol', () => {
     const text = (await readCsharpSymbol(db, sourcePath, 'Thing', 'ExposeData'))
       .content[0].text
 
-    expect(text).toContain('// File: Thing.cs')
+    expect(text).toContain('// File: Source/Thing.cs')
     expect(text).toContain('public virtual void ExposeData()')
     expect(text).toContain('Scribe_Defs.Look')
   })
@@ -89,11 +104,22 @@ describe('read-csharp-symbol', () => {
     expect(text).toContain('public abstract AlertReport GetReport();')
   })
 
-  test('renders every indexed type with a shared name', async () => {
+  test('lists every file defining a shared name instead of dumping all bodies', async () => {
     const text = (await readCsharpSymbol(db, sourcePath, 'Option')).content[0]
       .text
 
-    expect(text.match(/^\/\/ File:/gm)).toHaveLength(2)
+    expect(text).toContain("Type 'Option' is defined in 3 files")
+    expect(text).toContain('[vanilla] Source/One/Option.cs (line 1)')
+    expect(text).toContain('[test.mod] Mods/test.mod/Source/Option.cs (line 1)')
+    expect(text).toContain('with file_path to pick one')
+  })
+
+  test('file_path disambiguates a shared name', async () => {
+    const text = (
+      await readCsharpSymbol(db, sourcePath, 'Option', undefined, 'Source/Two/Option.cs')
+    ).content[0].text
+
+    expect(text).toContain('// File: Source/Two/Option.cs')
   })
 
   test('summarizes large type definitions', async () => {

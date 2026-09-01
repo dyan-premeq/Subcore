@@ -156,11 +156,9 @@ function synthesizeVanillaBaseMods(
 /**
  * Version authority is what the import steps brought in: dist/Version.txt
  * (written by import-defs) or the mods manifest (import-mods).
- * RIMSAGE_GAME_VERSION overrides. No silent default — fail loudly.
+ * No silent default — fail loudly.
  */
 function readGameVersion(manifest: ModsManifest | null, distVersionPath: string): string {
-  const override = process.env.RIMSAGE_GAME_VERSION
-  if (override) return override
   if (existsSync(distVersionPath)) {
     const parsed = parseVersionTxt(readFileSync(distVersionPath, 'utf8'))
     if (parsed) return parsed
@@ -168,7 +166,7 @@ function readGameVersion(manifest: ModsManifest | null, distVersionPath: string)
   if (manifest?.gameVersion) return manifest.gameVersion
   throw new Error(
     'Game version unknown: dist/Version.txt is missing or unparseable. ' +
-      'Run "bun run import:defs <gameRoot>" or set RIMSAGE_GAME_VERSION.',
+      'Run "bun run import:defs <gameRoot>".',
   )
 }
 

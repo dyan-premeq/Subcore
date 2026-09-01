@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { PathSandbox } from './utils/path-sandbox'
 import { db } from './utils/db'
-import { sourcePath } from './utils/env'
+import { assetsPath } from './utils/env'
 import { searchSource } from './tools/search-source'
 import { readFile } from './tools/read-file'
 import { listDirectory } from './tools/list-directory'
@@ -11,6 +11,7 @@ import { searchDefs, searchDefsOutputSchema } from './tools/search-defs'
 import { readCsharpSymbol } from './tools/read-csharp-symbol'
 import { listMods } from './tools/list-mods'
 import { searchPatches, searchPatchesOutputSchema } from './tools/search-patches'
+import { searchHarmony, searchHarmonyOutputSchema } from './tools/search-harmony'
 import pkg from '../package.json'
 
 const name = 'rimsage'
@@ -204,11 +205,17 @@ function registerTools(server: McpServer) {
           .describe(
             'Optional method name within the type (e.g. "ExposeData", "ConfigErrors").',
           ),
+        file_path: z
+          .string()
+          .optional()
+          .describe(
+            'Exact file pick when the type is defined in several files (vanilla + mods). The multi-hit response lists valid values.',
+          ),
       }),
       annotations: { readOnlyHint: true },
     },
-    ({ typeName, memberName }) =>
-      readCsharpSymbol(db, sourcePath, typeName, memberName),
+    ({ typeName, memberName, file_path }) =>
+      readCsharpSymbol(db, assetsPath, typeName, memberName, file_path),
   )
 
   // tool: list mods
@@ -268,5 +275,45 @@ function registerTools(server: McpServer) {
     },
     ({ defName, packageId, opClass, limit }) =>
       searchPatches(db, { defName, packageId, opClass, limit }),
+  )
+
+  // tool: search harmony patches
+  server.registerTool(
+    'search_harmony',
+    {
+      title: 'Search Harmony patches',
+      description:
+        'Reverse-lookup Harmony patches: which mod and patch class patches a vanilla type or method. Static parse of mod C# sources and decompiled assemblies; runtime-resolved targets appear as dynamic — read the mod source for those.',
+      inputSchema: z.object({
+        targetType: z
+          .string()
+          .optional()
+          .describe('Exact patched type name (e.g. `Pawn_InventoryTracker`).'),
+        targetMethod: z
+          .string()
+          .optional()
+          .describe('Exact patched method name (e.g. `Notify_ItemRemoved`).'),
+        mod: z
+          .string()
+          .optional()
+          .describe('Filter by patching mod packageId (e.g. `mehni.pickupandhaul`).'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .default(50)
+          .describe('Max results to return.'),
+      }),
+      outputSchema: searchHarmonyOutputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    ({ targetType, targetMethod, mod, limit }) =>
+      searchHarmony(db, {
+        targetType,
+        targetMethod,
+        packageId: mod,
+        limit,
+      }),
   )
 }

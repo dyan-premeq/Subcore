@@ -1,14 +1,12 @@
-// Single source of truth for index.db DDL (schema v3).
+// Single source of truth for index.db DDL (schema v4).
 //
-// Discipline (design doc §11): all CREATE TABLE statements live here — scripts
-// and repositories must not define tables inline. JSON columns are TEXT and are
-// parsed in the application layer; business queries stick to the portable SQL
-// subset (no SQLite-specific functions) to keep a future PostgreSQL migration
-// cheap.
+// All CREATE TABLE statements live here — scripts and repositories must not
+// define tables inline. JSON columns are TEXT parsed in the application
+// layer.
 
 import type { Database } from 'bun:sqlite'
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -50,6 +48,7 @@ CREATE TABLE IF NOT EXISTS csharp_index (
   typeName  TEXT,
   filePath  TEXT,
   startLine INTEGER,
+  modId     INTEGER,          -- owning mods row; NULL = vanilla decompiled root
   PRIMARY KEY (typeName, filePath)
 );
 

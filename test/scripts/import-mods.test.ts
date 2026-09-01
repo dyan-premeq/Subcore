@@ -9,6 +9,7 @@ import { Database } from 'bun:sqlite'
 import { importMods } from '../../src/scripts/import-mods'
 import { rebuildModsIndex } from '../../src/scripts/index-mods'
 import { listMods } from '../../src/repositories/mods-repo'
+import { findIlspycmd } from '../../src/utils/decompile'
 import { rmTemp } from '../helpers/fs'
 
 const gameRoot = join(import.meta.dir, '../fixtures/game-root')
@@ -160,6 +161,22 @@ describe('import-mods', () => {
         join(distRoot, 'missing-Version.txt'),
       ),
     ).rejects.toThrow('import:defs')
+  })
+
+  const ilspy = findIlspycmd()
+  test.skipIf(!ilspy)('decompiles effective assemblies into Source-decompiled (skips 0Harmony, ignores shadowed dlls)', async () => {
+    await run(true)
+
+    const betaDist = join(distRoot, 'assets/Mods/beta.core')
+    expect(existsSync(join(betaDist, 'Source-decompiled/Beta.decompiled.cs'))).toBe(true)
+    // recursive Assemblies scan (game: SearchOption.AllDirectories)
+    expect(existsSync(join(betaDist, 'Source-decompiled/Nested.decompiled.cs'))).toBe(true)
+
+    const alphaDist = join(distRoot, 'assets/Mods/alpha.tools')
+    // 1.6/Assemblies/Alpha.dll is the effective copy (root copy shadowed)
+    expect(existsSync(join(alphaDist, 'Source-decompiled/Alpha.decompiled.cs'))).toBe(true)
+    // the Harmony library itself is never decompiled
+    expect(existsSync(join(alphaDist, 'Source-decompiled/0Harmony.decompiled.cs'))).toBe(false)
   })
 })
 

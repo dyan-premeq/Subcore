@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import { textResponse } from '../utils/mcp-response'
 import { findCsharpTypes } from '../repositories/csharp-repo'
 
-type IndexRow = Pick<CsharpIndexRow, 'filePath' | 'startLine'>
+type IndexRow = Pick<CsharpIndexRow, 'filePath' | 'startLine'> & {
+  packageId: string | null
+}
 
 interface CodeBlock {
   startLine: number
@@ -28,8 +30,9 @@ export async function readCsharpSymbolImpl(
   sourcePath: string,
   typeName: string,
   memberName?: string,
+  filePath?: string,
 ): Promise<CSharpSymbolResult[]> {
-  const rows = getCsharpIndexRows(db, typeName)
+  const rows = getCsharpIndexRows(db, typeName, filePath)
   const results: CSharpSymbolResult[] = []
 
   for (const row of rows) {
@@ -65,15 +68,11 @@ export async function readCsharpSymbol(
   sourcePath: string,
   typeName: string,
   memberName?: string,
+  filePath?: string,
 ) {
-  const results = await readCsharpSymbolImpl(
-    db,
-    sourcePath,
-    typeName,
-    memberName,
-  )
+  const rows = getCsharpIndexRows(db, typeName, filePath)
 
-  if (results.length === 0) {
+  if (rows.length === 0) {
     const symbolLabel = memberName
       ? `Method '${memberName}' in type '${typeName}'`
       : `Type '${typeName}'`
@@ -81,6 +80,37 @@ export async function readCsharpSymbol(
     return {
       ...textResponse(
         `${symbolLabel} not found in index. Please check the name.`,
+      ),
+    }
+  }
+
+  // multiple definitions (vanilla + mods, or several mods): list the
+  // sources so the caller can re-invoke with file_path (design doc §6.7)
+  if (rows.length > 1) {
+    const lines = rows.map(
+      row =>
+        `[${row.packageId ?? 'vanilla'}] ${row.filePath} (line ${row.startLine + 1})`,
+    )
+    return textResponse(
+      `Type '${typeName}' is defined in ${rows.length} files. ` +
+        `Call read_csharp_symbol again with file_path to pick one:\n` +
+        lines.join('\n'),
+    )
+  }
+
+  const results = await readCsharpSymbolImpl(
+    db,
+    sourcePath,
+    typeName,
+    memberName,
+    filePath,
+  )
+
+  if (results.length === 0) {
+    // the type exists but the requested member does not
+    return {
+      ...textResponse(
+        `Method '${memberName}' in type '${typeName}' not found in index. Please check the name.`,
       ),
     }
   }
@@ -114,8 +144,12 @@ export async function readCsharpSymbol(
 }
 
 // #region Helpers
-function getCsharpIndexRows(db: Database, typeName: string): IndexRow[] {
-  return findCsharpTypes(db, typeName)
+function getCsharpIndexRows(
+  db: Database,
+  typeName: string,
+  filePath?: string,
+): IndexRow[] {
+  return findCsharpTypes(db, typeName, filePath)
 }
 
 function extractNamedMethods(

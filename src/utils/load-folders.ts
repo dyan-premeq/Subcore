@@ -165,6 +165,36 @@ export function computeEffectiveFiles(modRoot: string, foldersDescending: string
   return { effective: Array.from(seen.values()), shadowed }
 }
 
+/**
+ * Assemblies the game actually loads for the selected folders: mirrors
+ * ModContentPack.GetAllFilesForMod(mod, "Assemblies/", e => e.ToLower() == ".dll")
+ * — recursive, case-insensitive .dll, first-folder-wins per load-folder-relative
+ * key. Unlike XML there is no dotfile filter. Root-relative paths.
+ */
+export function computeEffectiveAssemblies(
+  modRoot: string,
+  foldersDescending: string[],
+): string[] {
+  const seen = new Map<string, string>()
+
+  for (const folder of foldersDescending) {
+    const folderDir = folder === ROOT_FOLDER ? modRoot : join(modRoot, folder)
+    const assembliesDir = join(folderDir, 'Assemblies')
+    if (!existsSync(assembliesDir)) continue
+
+    for (const absFile of listDllFiles(assembliesDir)) {
+      const relativeToFolder = toPosix(absFile.slice(folderDir.length + 1))
+      if (!seen.has(relativeToFolder)) {
+        seen.set(relativeToFolder, folder === ROOT_FOLDER
+          ? relativeToFolder
+          : toPosix(`${folder}/${relativeToFolder}`))
+      }
+    }
+  }
+
+  return Array.from(seen.values())
+}
+
 function listXmlFiles(dir: string): string[] {
   const out: string[] = []
   const walk = (current: string) => {
@@ -175,6 +205,22 @@ function listXmlFiles(dir: string): string[] {
       } else if (entry.name.toLowerCase().endsWith('.xml')) {
         // game skips files starting with "." or "._"
         if (entry.name.startsWith('.')) continue
+        out.push(full)
+      }
+    }
+  }
+  walk(dir)
+  return out.sort()
+}
+
+function listDllFiles(dir: string): string[] {
+  const out: string[] = []
+  const walk = (current: string) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = join(current, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+      } else if (entry.name.toLowerCase().endsWith('.dll')) {
         out.push(full)
       }
     }

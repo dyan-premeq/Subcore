@@ -22,6 +22,8 @@ export interface CsharpIndexRow {
   typeName: string
   filePath: string
   startLine: number
+  /** owning mods row; null = vanilla decompiled root (assets/Source) */
+  modId: number | null
 }
 
 export type SqlNamedParams = Extract<SQLQueryBindings, Record<string, unknown>>
