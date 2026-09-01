@@ -177,8 +177,13 @@ async function querySource(
   const groups = [...byGroup.entries()]
     .sort(([a], [b]) => groupRank(a) - groupRank(b) || (a < b ? -1 : a > b ? 1 : 0))
     .map(([group, hits]) => {
+      // Languages/ (DefInjected etc.) hits rank last so the per-group sample
+      // shows defs, patches and code before translation noise.
       const sorted = hits.sort(
-        (a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line),
+        (a, b) =>
+          Number(a.file.includes('/Languages/')) -
+            Number(b.file.includes('/Languages/')) ||
+          (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line),
       )
       return {
         group,
