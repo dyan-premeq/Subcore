@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { z } from 'zod'
-import { builder } from '../utils/xml-utils'
+import { buildXml } from '../utils/xml-utils'
 import { textResponse } from '../utils/mcp-response'
 import {
   getDefDetailsRows,
@@ -116,7 +116,7 @@ export function getDefDetails(
 function xmlOf(row: DefDetailResultRow): string {
   const obj = JSON.parse(row.payload)
   delete obj.defType
-  return builder.build({ [row.defType]: obj })
+  return buildXml({ [row.defType]: obj })
 }
 
 /**
@@ -203,6 +203,6 @@ function getPatchedView(
 function xmlOfPayload(payload: string, defType: string): string {
   const obj = JSON.parse(payload)
   delete obj.defType
-  return builder.build({ [defType]: obj })
+  return buildXml({ [defType]: obj })
 }
 
