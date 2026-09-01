@@ -5,7 +5,7 @@
 // every bundled copy would duplicate megabytes of identical source.
 
 import { spawnSync } from 'bun'
-import { existsSync, rmSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 export interface DecompileStats {
@@ -15,6 +15,20 @@ export interface DecompileStats {
 }
 
 const DECOMPILED_DIR = 'Source-decompiled'
+
+const IL_COMMENT_LINE = /^\s*\/\/IL_[0-9A-Fa-f]+:/
+
+/**
+ * Rewrites `path` without ilspycmd's `//IL_xxxx: Unknown result type...` noise
+ * lines (2354 in one observed file). Must happen at build time, before the
+ * csharp index bakes `startLine`, so served line numbers stay in sync with the
+ * file (design doc §3 F5).
+ */
+function stripIlComments(path: string): void {
+  const lines = readFileSync(path, 'utf8').split('\n')
+  const kept = lines.filter((line) => !IL_COMMENT_LINE.test(line))
+  if (kept.length !== lines.length) writeFileSync(path, kept.join('\n'))
+}
 
 export function findIlspycmd(): string | null {
   return Bun.which('ilspycmd')
@@ -71,6 +85,8 @@ export function decompileAssemblies(
       stats.failed += 1
       continue
     }
+
+    stripIlComments(outPath)
 
     stats.decompiled += 1
   }
