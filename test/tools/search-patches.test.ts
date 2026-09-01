@@ -89,6 +89,23 @@ afterAll(() => {
 })
 
 describe('search_patches', () => {
+  test('no filters returns guidance instead of a full-table dump', () => {
+    const result = searchPatches(db, {})
+
+    expect(result.content[0]!.text).toBe(
+      'Provide at least one filter: defName, packageId, or opClass.',
+    )
+    expect(result.structuredContent).toEqual({ total: 0, results: [] })
+  })
+
+  test('limit-only call (the residue of a stripped unknown key) also gets guidance', () => {
+    // the F1 incident: {"target":"StorytellerDef"} stripped to {limit:50}
+    const result = searchPatches(db, { limit: 10 })
+
+    expect(result.content[0]!.text).toContain('Provide at least one filter')
+    expect(result.structuredContent.total).toBe(0)
+  })
+
   test('finds ops by defName with exact element matching (no prefix false-positives)', () => {
     const { structuredContent } = searchPatches(db, { defName: 'Gun_A' })
     expect(structuredContent.total).toBe(2)

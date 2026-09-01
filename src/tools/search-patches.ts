@@ -32,6 +32,14 @@ export type SearchPatchesStructured = z.infer<typeof searchPatchesOutputSchema>
 export function searchPatches(db: Database, options: SearchPatchesOptions = {}): ReturnType<
   typeof textResponse
 > & { structuredContent: SearchPatchesStructured } {
+  // no filter -> zero WHERE -> full-table dump; refuse before touching the db
+  if (!options.defName && !options.packageId && !options.opClass) {
+    return {
+      ...textResponse('Provide at least one filter: defName, packageId, or opClass.'),
+      structuredContent: { total: 0, results: [] },
+    }
+  }
+
   const results = searchPatchOps(
     db,
     { defName: options.defName, packageId: options.packageId, opClass: options.opClass },

@@ -25,9 +25,9 @@ Routing:
   loads; merged for the inheritance-resolved authoring view)
 - Looking for a def -> search_defs (indexed, fast)
 - Any other XML/C# text -> search_source (regex, slow, last resort)
-- "Who changed this def?" -> search_patches (XML PatchOperations)
+- "Who changed this def?" -> search_patches (filters: defName / packageId / opClass)
 - "Who hooks this C# method?" -> search_harmony (Harmony patches)
-- What is in the profile -> list_mods
+- What is in the profile -> list_mods (overview; detail:true + page for per-mod folders/assets/warnings)
 
 Data boundaries:
 - Mod dependencies / loadAfter / incompatibleWith are not indexed. Read the
@@ -51,7 +51,7 @@ function registerTools(server: McpServer) {
     {
       title: 'Search RimWorld source',
       description: 'Search RimWorld source code using regex.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         query: z.string().describe('Regex pattern.'),
         file_pattern: z
           .string()
@@ -65,7 +65,7 @@ function registerTools(server: McpServer) {
           .string()
           .optional()
           .describe(
-            "Restrict search: 'vanilla' (game Defs + decompiled Source), 'mods' (all imported mods), 'all' (default), or a packageId (e.g. 'mehni.pickupandhaul').",
+            "Valid: 'all' (default), 'vanilla' (Defs + Source), 'mods', or a packageId (e.g. 'mehni.pickupandhaul').",
           ),
         loaded_only: z
           .boolean()
@@ -89,7 +89,7 @@ function registerTools(server: McpServer) {
     {
       title: 'Read source file',
       description: 'Read source file.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         path: z
           .string()
           .describe(
@@ -122,7 +122,7 @@ function registerTools(server: McpServer) {
     {
       title: 'List directory',
       description: 'List contents of a directory.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         path: z
           .string()
           .default('')
@@ -147,7 +147,7 @@ function registerTools(server: McpServer) {
     {
       title: 'Get Def details',
       description: 'Get XML of a Def, with its mod override lineage.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         defName: z.string().describe('Exact defName (e.g. `Gun_Revolver`).'),
         defType: z
           .string()
@@ -185,7 +185,7 @@ function registerTools(server: McpServer) {
     {
       title: 'Search Defs',
       description: 'Search Def indices by partial name or label.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         query: z.string().describe('Case-insensitive keyword.'),
         defType: z
           .string()
@@ -222,15 +222,17 @@ function registerTools(server: McpServer) {
     {
       title: 'Read C# symbol',
       description: 'Read a C# type or method definition.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         typeName: z
           .string()
-          .describe('Exact type name (e.g. "ThingDef", "JobDriver").'),
+          .describe(
+            'Exact type name (e.g. "ThingDef", "JobDriver"). Namespace-qualified names are accepted and matched by bare type name.',
+          ),
         memberName: z
           .string()
           .optional()
           .describe(
-            'Optional method name within the type (e.g. "ExposeData", "ConfigErrors").',
+            'Optional member (method or field) name within the type (e.g. "ExposeData", "ConfigErrors").',
           ),
         file_path: z
           .string()
@@ -251,12 +253,25 @@ function registerTools(server: McpServer) {
     {
       title: 'List indexed mods',
       description:
-        'List the mods in the current dev profile: load order, packageId, name, source, active folders and warnings.',
-      inputSchema: z.object({}),
+        'List the mods in the current dev profile. Default = one-line overview per mod; pass detail:true (+page) for folders, assets and full warnings.',
+      inputSchema: z.strictObject({
+        detail: z
+          .boolean()
+          .default(false)
+          .describe(
+            'Two-tier output: false (default) = one-line overview per mod; true = full detail (folders, assets, all warnings) paged 20 per page.',
+          ),
+        page: z
+          .number()
+          .int()
+          .min(1)
+          .default(1)
+          .describe('Detail-mode page number (20 mods per page). Only used with detail:true.'),
+      }),
       outputSchema: listModsOutputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    () => listMods(db),
+    ({ detail, page }) => listMods(db, { detail, page }),
   )
 
   // tool: search patches
@@ -266,7 +281,7 @@ function registerTools(server: McpServer) {
       title: 'Search XML patches',
       description:
         'Reverse-lookup XML patch operations: which mod, file and operation patched a def, mod, or op class. The entry point for writing compatibility patches.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         defName: z
           .string()
           .optional()
@@ -305,7 +320,7 @@ function registerTools(server: McpServer) {
       title: 'Search Harmony patches',
       description:
         'Reverse-lookup Harmony patches: which mod and patch class patches a vanilla type or method. Static parse of mod C# sources and decompiled assemblies; runtime-resolved targets appear as dynamic — read the mod source for those.',
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         targetType: z
           .string()
           .optional()
