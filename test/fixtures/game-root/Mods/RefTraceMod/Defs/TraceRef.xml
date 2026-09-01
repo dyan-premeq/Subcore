@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <ThingDef ParentName="BaseThing">
+    <defName>Ref_Thing</defName>
+    <label>mod-side redefinition</label>
+  </ThingDef>
+</Defs>

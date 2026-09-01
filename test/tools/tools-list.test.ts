@@ -16,6 +16,7 @@ const EXPECTED_TOOLS = [
   'list_mods',
   'search_patches',
   'search_harmony',
+  'find_refs',
 ]
 
 const TOOLS_WITH_OUTPUT_SCHEMA = new Set([
@@ -25,11 +26,12 @@ const TOOLS_WITH_OUTPUT_SCHEMA = new Set([
   'list_mods',
   'search_patches',
   'search_harmony',
+  'find_refs',
 ])
 
 describe('tools/list over stdio', () => {
   test(
-    'registers the nine read-only tools in order with titles and output schemas',
+    'registers the ten read-only tools in order with titles and output schemas',
     async () => {
       const proc = Bun.spawn(['bun', 'src/stdio.ts'], {
         stdin: 'pipe',

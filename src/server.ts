@@ -12,6 +12,7 @@ import { readCsharpSymbol } from './tools/read-csharp-symbol'
 import { listMods, listModsOutputSchema } from './tools/list-mods'
 import { searchPatches, searchPatchesOutputSchema } from './tools/search-patches'
 import { searchHarmony, searchHarmonyOutputSchema } from './tools/search-harmony'
+import { findRefs, findRefsOutputSchema } from './tools/find-refs'
 import pkg from '../package.json'
 
 const name = 'rimsage'
@@ -27,8 +28,9 @@ Routing:
 - Any other XML/C# text -> search_source (regex, slow, last resort)
 - "Who changed this def?" -> search_patches (filters: defName / packageId / opClass)
 - "Who hooks this C# method?" -> search_harmony (Harmony patches)
+- "Who references / uses this def, class or method?" -> find_refs (exhaustive, all layers)
 - What is in the profile -> list_mods (overview; detail:true + page for per-mod folders/assets/warnings)
-- structuredContent: search_defs/search_patches/search_harmony/list_mods/list_directory/get_def_details return it; search_source/read_file/read_csharp_symbol are text-only.
+- structuredContent: search_defs/search_patches/search_harmony/find_refs/list_mods/list_directory/get_def_details return it; search_source/read_file/read_csharp_symbol are text-only.
 
 Data boundaries:
 - Mod dependencies / loadAfter / incompatibleWith are not indexed. Read the
@@ -366,5 +368,25 @@ function registerTools(server: McpServer) {
         packageId: mod,
         limit,
       }),
+  )
+
+  // tool: find refs
+  server.registerTool(
+    'find_refs',
+    {
+      title: 'Find all references',
+      description:
+        'Exhaustively find every reference to an exact identifier (defName, C# type, or method) across ALL layers: vanilla Defs/Source, mod XML & decompiled C#, XML patches, Harmony patches. Use this FIRST when tracing who uses/spawns/consumes something.',
+      inputSchema: z.strictObject({
+        name: z
+          .string()
+          .describe(
+            'Exact identifier: a defName, C# type or method name (e.g. `Gun_Revolver`, `StoreUtility`, `Notify_ItemRemoved`).',
+          ),
+      }),
+      outputSchema: findRefsOutputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    ({ name }) => findRefs(db, sandbox, name),
   )
 }
