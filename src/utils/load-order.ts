@@ -15,8 +15,6 @@ import {
 
 export interface ResolveProfileOrderOptions {
   gameVersion: string
-  /** player ModsConfig snapshot (diagnostics only) */
-  playerActivePackageIds?: string[] | null
 }
 
 /**

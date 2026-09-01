@@ -43,7 +43,7 @@ export async function rebuildModsIndex(
     } else {
       // zero-config default for vanilla-only builds: base rows synthesized
       // from the dist/assets/Defs category folders
-      synthesizeVanillaBaseMods(db, listCategories(defsSourcePath), gameVersion)
+      synthesizeVanillaBaseMods(db, listCategories(defsSourcePath))
     }
 
     setMeta(db, 'game_version', gameVersion)
@@ -59,21 +59,15 @@ export async function rebuildModsIndex(
 }
 
 function insertFromManifest(db: Database, manifest: ModsManifest): void {
-  const playerActive = new Set(manifest.playerActivePackageIds ?? [])
   const rows = manifest.mods.map(mod => ({
     packageId: mod.packageId,
     name: mod.name,
-    author: mod.author ?? null,
     source: mod.source,
-    rootPath: mod.rootPath,
     assetPath: mod.assetPath,
     loadOrder: mod.loadOrder,
     inProfile: mod.inProfile,
-    playerActive: playerActive.has(mod.packageId),
     activeFolders: mod.activeFolders as string[] | null,
     warnings: [...mod.warnings, ...mod.issues.map(i => `${i.kind}: ${i.detail}`)],
-    supportedVersions: mod.supportedVersions,
-    dependencies: mod.dependencies,
     dataCategory: mod.dataCategory ?? null,
   }))
 
@@ -81,17 +75,12 @@ function insertFromManifest(db: Database, manifest: ModsManifest): void {
     rows.push({
       packageId: extra.packageId,
       name: extra.name,
-      author: extra.author ?? null,
       source: extra.source,
-      rootPath: extra.rootPath,
       assetPath: '',
       loadOrder: -1,
       inProfile: false,
-      playerActive: playerActive.has(extra.packageId),
       activeFolders: [] as string[] | null,
       warnings: extra.warnings,
-      supportedVersions: extra.supportedVersions,
-      dependencies: extra.dependencies,
       dataCategory: extra.dataCategory ?? null,
     })
   }
@@ -115,7 +104,6 @@ function listCategories(defsSourcePath: string): string[] {
 function synthesizeVanillaBaseMods(
   db: Database,
   categories: string[],
-  gameVersion: string,
 ): void {
   const rows: ModInsertRow[] = []
   // Core always exists (a defs tree may have no category subfolders at all)
@@ -133,19 +121,14 @@ function synthesizeVanillaBaseMods(
     return {
       packageId,
       name: isCore ? 'RimWorld Core' : category,
-      author: 'Ludeon Studios',
       source: isCore ? 'builtin' : 'dlc',
-      rootPath: `Data/${category}`,
       assetPath: '',
       loadOrder: isCore
         ? 0
         : Math.max(1, (PRODUCT_PACKAGE_IDS as readonly string[]).indexOf(packageId)),
       inProfile: true,
-      playerActive: false,
       activeFolders: null,
       warnings: [],
-      supportedVersions: [gameVersion.split('.').slice(0, 2).join('.')],
-      dependencies: [],
       dataCategory: category,
     }
   }

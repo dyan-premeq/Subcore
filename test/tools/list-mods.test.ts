@@ -14,17 +14,12 @@ function mod(
   return {
     packageId,
     name: packageId,
-    author: null,
     source: 'workshop',
-    rootPath: '',
     assetPath: '',
     loadOrder,
     inProfile: loadOrder >= 0,
-    playerActive: false,
     activeFolders: null,
     warnings: [],
-    supportedVersions: ['1.6'],
-    dependencies: [],
     dataCategory: null,
     ...overrides,
   }
@@ -37,14 +32,10 @@ beforeAll(() => {
     mod('ludeon.rimworld', 0, { source: 'builtin', name: 'RimWorld Core' }),
     mod('alpha.tools', 1, {
       assetPath: 'Mods/alpha.tools',
-      playerActive: true,
-      dependencies: [{ packageId: 'beta.core' }],
+      activeFolders: ['1.6', '.'],
       warnings: ['unsupportedVersion: 1.6 not in supportedVersions'],
     }),
-    mod('beta.core', 2, {
-      assetPath: 'Mods/beta.core',
-      playerActive: true,
-    }),
+    mod('beta.core', 2, { assetPath: 'Mods/beta.core' }),
     mod('ghost.mod', -1, { warnings: ['missing About.xml'] }),
   ])
 })
@@ -52,32 +43,78 @@ beforeAll(() => {
 afterAll(() => db.close())
 
 describe('list-mods', () => {
-  test('lists in-profile mods with load order and metadata, then metadata-only mods', () => {
+  test('lists in-profile mods in load order, omitting the rest', () => {
     const text = listMods(db).content[0].text
 
-    expect(text).toContain('Mods (3 in profile):')
-    expect(text).toContain('[0] ludeon.rimworld RimWorld Core (builtin; in-profile')
-    expect(text).toContain('[1] alpha.tools')
-    expect(text).toContain('player-active')
-    expect(text).toContain('Discovered but not in profile (1, metadata only):')
-    // alpha depends on beta.core which IS indexed
-    expect(text).toContain('deps: ok')
-    expect(text).toContain('[-] ghost.mod')
-    expect(text).toContain('warnings(1)')
-  })
-
-  test('inProfile=true hides metadata-only mods', () => {
-    const text = listMods(db, { inProfile: true }).content[0].text
+    expect(text).toContain('Mods (3):')
+    expect(text).toContain('[0] ludeon.rimworld RimWorld Core (official)')
+    expect(text).toContain('[1] alpha.tools alpha.tools (mod)')
+    expect(text).toContain('folders=1.6,.')
+    expect(text).toContain(
+      'warnings(1): unsupportedVersion: 1.6 not in supportedVersions',
+    )
+    expect(text).toContain('[2] beta.core')
     expect(text).not.toContain('ghost.mod')
-    expect(text).not.toContain('Discovered but not in profile')
   })
 
-  test('playerActive=true is a diagnostic view', () => {
-    const text = listMods(db, { playerActive: true }).content[0].text
-    expect(text).toContain('alpha.tools')
-    expect(text).toContain('beta.core')
-    expect(text).not.toContain('ludeon.rimworld') // playerActive=false for base
+  test('structured rows carry exactly the seven output fields', () => {
+    const { structuredContent } = listMods(db)
+
+    expect(structuredContent.total).toBe(3)
+    for (const row of structuredContent.results) {
+      expect(Object.keys(row).sort()).toEqual([
+        'activeFolders',
+        'assetPath',
+        'loadOrder',
+        'name',
+        'packageId',
+        'source',
+        'warnings',
+      ])
+    }
   })
 
+  test('source folds builtin to official and workshop to mod', () => {
+    const results = listMods(db).structuredContent.results
 
+    expect(results.find(r => r.packageId === 'ludeon.rimworld')!.source).toBe(
+      'official',
+    )
+    expect(results.find(r => r.packageId === 'alpha.tools')!.source).toBe('mod')
+  })
+
+  test('activeFolders and warnings are arrays, not JSON strings', () => {
+    const alpha = listMods(db).structuredContent.results.find(
+      r => r.packageId === 'alpha.tools',
+    )!
+
+    expect(Array.isArray(alpha.activeFolders)).toBe(true)
+    expect(alpha.activeFolders).toEqual(['1.6', '.'])
+    expect(Array.isArray(alpha.warnings)).toBe(true)
+    expect(alpha.warnings).toEqual([
+      'unsupportedVersion: 1.6 not in supportedVersions',
+    ])
+  })
+
+  test('mods outside the profile never surface', () => {
+    const result = listMods(db)
+
+    expect(result.structuredContent.results.map(r => r.packageId)).not.toContain(
+      'ghost.mod',
+    )
+    expect(result.content[0].text).not.toContain('ghost.mod')
+  })
+
+  test('an empty profile returns empty structuredContent with guidance text', () => {
+    const empty = new Database(':memory:')
+    ensureSchema(empty)
+    try {
+      const result = listMods(empty)
+
+      expect(result.structuredContent).toEqual({ total: 0, results: [] })
+      expect(result.content[0].text).toContain('No mods found')
+    } finally {
+      empty.close()
+    }
+  })
 })

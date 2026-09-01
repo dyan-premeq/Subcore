@@ -15,17 +15,12 @@ function mod(
   return {
     packageId,
     name: packageId,
-    author: null,
     source,
-    rootPath: '',
     assetPath: '',
     loadOrder,
     inProfile: source === 'local' || source === 'workshop',
-    playerActive: false,
     activeFolders: null,
     warnings: [],
-    supportedVersions: ['1.6'],
-    dependencies: [],
     dataCategory: null,
   }
 }

@@ -8,7 +8,8 @@ import { write } from 'bun'
 import { Database } from 'bun:sqlite'
 import { importMods } from '../../src/scripts/import-mods'
 import { rebuildModsIndex } from '../../src/scripts/index-mods'
-import { listMods } from '../../src/repositories/mods-repo'
+import { listProfileMods } from '../../src/repositories/mods-repo'
+import type { ModsRow } from '../../src/types'
 import { findIlspycmd } from '../../src/utils/decompile'
 import { rmTemp } from '../helpers/fs'
 
@@ -82,10 +83,6 @@ describe('import-mods', () => {
     expect(notInProfile).toContain('delta.noabout')
     expect(notInProfile).toContain('epsilon.oldstyle')
     expect(existsSync(join(distRoot, 'assets/Mods/delta.noabout'))).toBe(false)
-
-    // player ModsConfig snapshot recorded
-    expect(result.manifest.playerActivePackageIds).toContain('alpha.tools')
-    expect(alpha.playerActive).toBe(true)
   })
 
   test('is incremental: unchanged files are skipped, changed files recopied', async () => {
@@ -124,21 +121,19 @@ describe('import-mods', () => {
 
     const db = new Database(dbPath, { readonly: true })
     try {
-      const rows = listMods(db)
-      const inProfile = rows.filter(row => row.inProfile === 1)
-      expect(inProfile).toHaveLength(5) // core + royalty + beta + alpha + gamma
+      const rows = listProfileMods(db)
+      expect(rows).toHaveLength(5) // core + royalty + beta + alpha + gamma
 
-      const delta = rows.find(row => row.packageId === 'delta.noabout')
-      expect(delta?.loadOrder).toBe(-1)
-      expect(delta?.inProfile).toBe(0)
-      expect(JSON.parse(delta?.warnings ?? '[]').length).toBeGreaterThan(0)
+      // discovered-but-not-in-profile mods land as metadata-only rows
+      const delta = db
+        .query<ModsRow, [string]>('SELECT * FROM mods WHERE packageId = ?')
+        .get('delta.noabout')!
+      expect(delta.loadOrder).toBe(-1)
+      expect(delta.inProfile).toBe(0)
+      expect(JSON.parse(delta.warnings ?? '[]').length).toBeGreaterThan(0)
 
-      const alpha = rows.find(row => row.packageId === 'alpha.tools')
-      expect(alpha?.playerActive).toBe(1)
-      expect(JSON.parse(alpha?.activeFolders ?? '[]')).toEqual(['1.6', '.'])
-      expect(JSON.parse(alpha?.dependencies ?? '[]')).toEqual([
-        { packageId: 'beta.core', displayName: 'Beta Core' },
-      ])
+      const alpha = rows.find(row => row.packageId === 'alpha.tools')!
+      expect(JSON.parse(alpha.activeFolders ?? '[]')).toEqual(['1.6', '.'])
 
       // game version comes from the manifest when dist/Version.txt is absent
       const metaVersion = db

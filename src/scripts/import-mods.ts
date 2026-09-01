@@ -10,7 +10,6 @@ import type {
 import {
   gameRootFromEnv,
   modsAssetPath,
-  modsConfigFromEnv,
   modsManifestPath,
   workshopRootFromEnv,
 } from '../utils/env'
@@ -97,13 +96,6 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
     console.warn(`[load-order] ${issue.kind}: ${issue.packageId} — ${issue.detail}`)
   }
 
-  const playerActivePackageIds = readPlayerActiveMods(
-    modsConfigPath ?? modsConfigFromEnv(),
-  )
-  if (playerActivePackageIds) {
-    console.log(`Player ModsConfig: ${playerActivePackageIds.length} active mods (diagnostic only).`)
-  }
-
   // copy in-profile community mods
   let copiedFiles = 0
   let skippedFiles = 0
@@ -154,7 +146,6 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
       ...mod,
       loadOrder: index,
       inProfile: true,
-      playerActive: playerActivePackageIds?.includes(mod.packageId) ?? false,
       assetPath,
       activeFolders,
       effectiveFiles,
@@ -171,7 +162,6 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
     generatedAt: new Date().toISOString(),
     gameVersion,
     profile: loaded.profile,
-    playerActivePackageIds,
     mods: manifestMods,
     discoveredNotInProfile,
   }

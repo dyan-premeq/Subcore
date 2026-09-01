@@ -14,17 +14,12 @@ let sourcePath: string
 const modRow: ModInsertRow = {
   packageId: 'test.mod',
   name: 'test.mod',
-  author: null,
   source: 'workshop',
-  rootPath: '',
   assetPath: 'Mods/test.mod',
   loadOrder: 1,
   inProfile: true,
-  playerActive: false,
   activeFolders: null,
   warnings: [],
-  supportedVersions: ['1.6'],
-  dependencies: [],
   dataCategory: null,
 }
 

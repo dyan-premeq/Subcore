@@ -21,17 +21,12 @@ function mod(packageId: string, loadOrder: number, name: string | null = null): 
   return {
     packageId,
     name,
-    author: null,
     source: loadOrder === 0 ? 'builtin' : 'workshop',
-    rootPath: '',
     assetPath: loadOrder === 0 ? '' : `Mods/${packageId}`,
     loadOrder,
     inProfile: true,
-    playerActive: false,
     activeFolders: null,
     warnings: [],
-    supportedVersions: ['1.6'],
-    dependencies: [],
     dataCategory: loadOrder === 0 ? 'Core' : null,
   }
 }
@@ -131,7 +126,6 @@ beforeAll(async () => {
       generatedAt: new Date().toISOString(),
       gameVersion: '1.6.4871',
       profile: { name: 'test', base: 'all-dlc', mods: ['beta.mod'], autoOrder: true },
-      playerActivePackageIds: null,
       mods: [
         {
           packageId: 'ludeon.rimworld',
@@ -148,7 +142,6 @@ beforeAll(async () => {
           warnings: [],
           loadOrder: 0,
           inProfile: true,
-          playerActive: false,
           assetPath: '',
           activeFolders: ['.'],
           effectiveFiles: [],
@@ -170,7 +163,6 @@ beforeAll(async () => {
           warnings: [],
           loadOrder: 1,
           inProfile: true,
-          playerActive: false,
           assetPath: 'Mods/beta.mod',
           activeFolders: ['.'],
           effectiveFiles: ['Defs/Dupes.xml', 'Defs/ZDupes.xml', 'Patches/PatchMain.xml'],

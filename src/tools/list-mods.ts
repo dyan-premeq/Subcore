@@ -1,70 +1,86 @@
 import type { Database } from 'bun:sqlite'
-import type { ModDependency, ModsRow } from '../types'
+import { z } from 'zod'
+import type { ModSource, ModsRow } from '../types'
 import { textResponse } from '../utils/mcp-response'
-import { listMods as listModsRows } from '../repositories/mods-repo'
+import { listProfileMods } from '../repositories/mods-repo'
 import { parseJsonArray } from '../utils/json'
 
-export interface ListModsFilter {
-  inProfile?: boolean
-  playerActive?: boolean
+export function listModsImpl(db: Database): ModsRow[] {
+  return listProfileMods(db)
 }
 
-export function listModsImpl(db: Database, filter: ListModsFilter = {}): ModsRow[] {
-  return listModsRows(db, filter)
-}
+/** Registered as outputSchema for list_mods in server.ts. */
+export const listModsOutputSchema = z.object({
+  total: z.number(),
+  results: z.array(
+    z.object({
+      packageId: z.string(),
+      name: z.string().nullable(),
+      source: z.enum(['official', 'mod']),
+      loadOrder: z.number(),
+      activeFolders: z.array(z.string()),
+      warnings: z.array(z.string()),
+      assetPath: z.string(),
+    }),
+  ),
+})
 
-export function listMods(db: Database, filter: ListModsFilter = {}) {
-  const rows = listModsImpl(db, filter)
+export type ListModsStructured = z.infer<typeof listModsOutputSchema>
+
+export function listMods(
+  db: Database,
+): ReturnType<typeof textResponse> & { structuredContent: ListModsStructured } {
+  const rows = listModsImpl(db)
+
+  // every success result must carry structuredContent once an outputSchema is
+  // registered — the SDK validates it before the result leaves the server
+  const structuredContent: ListModsStructured = {
+    total: rows.length,
+    results: rows.map(row => ({
+      packageId: row.packageId,
+      name: row.name,
+      source: foldSource(row.source),
+      loadOrder: row.loadOrder,
+      activeFolders: parseJsonArray(row.activeFolders ?? '[]', String),
+      warnings: parseJsonArray(row.warnings ?? '[]', String),
+      assetPath: row.assetPath,
+    })),
+  }
 
   if (rows.length === 0) {
-    return textResponse(
-      'No mods found. Vanilla-only builds have no mods table entries unless ' +
-        'import-mods has been run (base packages appear after `bun run build`).',
-    )
-  }
-
-  // dependency satisfaction is evaluated against everything indexed
-  const indexedIds = new Set(rows.map(row => row.packageId))
-
-  const inProfile = rows.filter(row => row.inProfile === 1)
-  const notInProfile = rows.filter(row => row.inProfile !== 1)
-
-  const lines: string[] = [`Mods (${inProfile.length} in profile):`]
-  for (const row of inProfile) {
-    lines.push(formatMod(row, indexedIds))
-  }
-
-  if (notInProfile.length > 0 && !filter.inProfile) {
-    lines.push('', `Discovered but not in profile (${notInProfile.length}, metadata only):`)
-    for (const row of notInProfile) {
-      lines.push(formatMod(row, indexedIds))
+    return {
+      ...textResponse(
+        'No mods found. Vanilla-only builds have no mods table entries unless ' +
+          'import-mods has been run (base packages appear after `bun run build`).',
+      ),
+      structuredContent,
     }
   }
 
-  return textResponse(lines.join('\n'))
+  const lines: string[] = [`Mods (${rows.length}):`]
+  for (const row of rows) {
+    lines.push(formatMod(row))
+  }
+
+  return { ...textResponse(lines.join('\n')), structuredContent }
 }
 
-function formatMod(row: ModsRow, indexedIds: Set<string>): string {
+function foldSource(source: ModSource): 'official' | 'mod' {
+  return source === 'builtin' || source === 'dlc' ? 'official' : 'mod'
+}
+
+function formatMod(row: ModsRow): string {
   const parts: string[] = []
 
   const order = row.loadOrder >= 0 ? String(row.loadOrder) : '-'
   parts.push(`[${order}] ${row.packageId}`)
   parts.push(row.name ?? '(unnamed)')
+  parts.push(`(${foldSource(row.source)})`)
 
-  const tags: string[] = [row.source]
-  if (row.inProfile === 1) tags.push('in-profile')
-  else tags.push('not-in-profile')
-  if (row.playerActive === 1) tags.push('player-active')
+  const folders = parseJsonArray(row.activeFolders ?? '[]', String)
+  if (folders.length > 0) parts.push(`folders=${folders.join(',')}`)
 
-  const deps = dependencyStatus(row.dependencies, indexedIds)
-  if (deps) tags.push(deps)
-
-  const versions = parseJsonArray(row.supportedVersions ?? '[]', String)
-  if (versions.length > 0) {
-    tags.push(`v${versions.slice(0, 3).join(', v')}${versions.length > 3 ? '+…' : ''}`)
-  }
-
-  parts.push(`(${tags.join('; ')})`)
+  if (row.assetPath) parts.push(`assets=${row.assetPath}`)
 
   const warnings = parseJsonArray(row.warnings ?? '[]', String)
   if (warnings.length > 0) {
@@ -73,26 +89,4 @@ function formatMod(row: ModsRow, indexedIds: Set<string>): string {
   }
 
   return parts.join(' ')
-}
-
-function dependencyStatus(
-  dependenciesJson: string | null,
-  indexedIds: Set<string>,
-): string | null {
-  const deps = parseDependencies(dependenciesJson)
-  if (deps.length === 0) return null
-  const missing = deps
-    .filter(dep => !indexedIds.has(dep.packageId.split('|')[0]))
-    .map(dep => dep.packageId)
-  return missing.length === 0 ? 'deps: ok' : `deps: missing ${missing.join(', ')}`
-}
-
-function parseDependencies(json: string | null): ModDependency[] {
-  if (!json) return []
-  try {
-    const parsed = JSON.parse(json)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
 }

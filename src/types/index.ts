@@ -101,7 +101,6 @@ export interface ResolvedLoadOrder {
 export interface ManifestMod extends ModInfo {
   loadOrder: number
   inProfile: boolean
-  playerActive: boolean
   /** dist/assets-relative root ('' for builtin/dlc, 'Mods/<pkg>' for mods) */
   assetPath: string
   /** selected load folders, descending in-mod priority ('.' = mod root) */
@@ -117,8 +116,6 @@ export interface ModsManifest {
   generatedAt: string
   gameVersion: string
   profile: Profile
-  /** player ModsConfig active list snapshot (diagnostics only), null if unreadable */
-  playerActivePackageIds: string[] | null
   /** in-profile mods, ordered by loadOrder (base first) */
   mods: ManifestMod[]
   /** discovered but not in the profile (metadata only, not copied/indexed) */
@@ -129,17 +126,12 @@ export interface ModsRow {
   modId: number
   packageId: string
   name: string | null
-  author: string | null
   source: ModSource
-  rootPath: string
   assetPath: string
   loadOrder: number
   inProfile: number
-  playerActive: number
   activeFolders: string | null
   warnings: string | null
-  supportedVersions: string | null
-  dependencies: string | null
   dataCategory: string | null
 }
 

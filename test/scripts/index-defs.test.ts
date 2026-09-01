@@ -16,17 +16,12 @@ function mod(packageId: string, loadOrder: number, dataCategory: string | null =
   return {
     packageId,
     name: packageId,
-    author: null,
     source: loadOrder === 0 ? 'builtin' : 'workshop',
-    rootPath: '',
     assetPath: loadOrder === 0 ? '' : `Mods/${packageId}`,
     loadOrder,
     inProfile: true,
-    playerActive: false,
     activeFolders: null,
     warnings: [],
-    supportedVersions: ['1.6'],
-    dependencies: [],
     dataCategory,
   }
 }
@@ -142,7 +137,6 @@ beforeAll(async () => {
       generatedAt: new Date().toISOString(),
       gameVersion: '1.6.4871',
       profile: { name: 't', base: 'all-dlc', mods: ['beta.mod'], autoOrder: true },
-      playerActivePackageIds: null,
       mods: [
         {
           packageId: 'beta.mod',
@@ -152,7 +146,6 @@ beforeAll(async () => {
           assetPath: 'Mods/beta.mod',
           loadOrder: 1,
           inProfile: true,
-          playerActive: false,
           supportedVersions: ['1.6'],
           loadFolders: {},
           versionDirs: [],

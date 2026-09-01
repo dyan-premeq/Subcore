@@ -1,4 +1,5 @@
 import { readdir } from 'node:fs/promises'
+import { z } from 'zod'
 import { PathSandbox } from '../utils/path-sandbox'
 import { textResponse } from '../utils/mcp-response'
 import { compareStrings } from '../utils/compare'
@@ -44,6 +45,14 @@ export async function listDirectoryImpl(
   return { entries, total }
 }
 
+/** Registered as outputSchema for list_directory in server.ts. */
+export const listDirectoryOutputSchema = z.object({
+  total: z.number(),
+  results: z.array(
+    z.object({ name: z.string(), type: z.enum(['directory', 'file']) }),
+  ),
+})
+
 export async function listDirectory(
   sandbox: PathSandbox,
   path: string = '',
@@ -63,7 +72,10 @@ export async function listDirectory(
       finalOutput += '\n(Tip: Increase `limit` or use `search_source`.)'
     }
 
-    return textResponse(finalOutput)
+    return {
+      ...textResponse(finalOutput),
+      structuredContent: { total, results: entries },
+    }
   } catch (error: unknown) {
     const fsError = error as NodeJS.ErrnoException
 

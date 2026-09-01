@@ -24,17 +24,12 @@ function seedMod(dbPath: string, packageId: string, assetPath: string): number {
     const row: ModInsertRow = {
       packageId,
       name: packageId,
-      author: null,
       source: 'workshop',
-      rootPath: '',
       assetPath,
       loadOrder: 1,
       inProfile: true,
-      playerActive: false,
       activeFolders: null,
       warnings: [],
-      supportedVersions: ['1.6'],
-      dependencies: [],
       dataCategory: null,
     }
     replaceMods(db, [row])

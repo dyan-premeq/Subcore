@@ -5,11 +5,11 @@ import { db } from './utils/db'
 import { assetsPath } from './utils/env'
 import { searchSource } from './tools/search-source'
 import { readFile } from './tools/read-file'
-import { listDirectory } from './tools/list-directory'
+import { listDirectory, listDirectoryOutputSchema } from './tools/list-directory'
 import { getDefDetails, defDetailsOutputSchema } from './tools/get-def-details'
 import { searchDefs, searchDefsOutputSchema } from './tools/search-defs'
 import { readCsharpSymbol } from './tools/read-csharp-symbol'
-import { listMods } from './tools/list-mods'
+import { listMods, listModsOutputSchema } from './tools/list-mods'
 import { searchPatches, searchPatchesOutputSchema } from './tools/search-patches'
 import { searchHarmony, searchHarmonyOutputSchema } from './tools/search-harmony'
 import pkg from '../package.json'
@@ -18,8 +18,28 @@ const name = 'rimsage'
 const version = pkg.version
 const sandbox = new PathSandbox('dist/assets')
 
+const instructions = `RimSage indexes a local RimWorld install plus a dev profile of mods. Read-only.
+
+Routing:
+- Know the defName -> get_def_details (view=patched for what the game actually
+  loads; merged for the inheritance-resolved authoring view)
+- Looking for a def -> search_defs (indexed, fast)
+- Any other XML/C# text -> search_source (regex, slow, last resort)
+- "Who changed this def?" -> search_patches (XML PatchOperations)
+- "Who hooks this C# method?" -> search_harmony (Harmony patches)
+- What is in the profile -> list_mods
+
+Data boundaries:
+- Mod dependencies / loadAfter / incompatibleWith are not indexed. Read the
+  mod's About/About.xml with read_file when asked. Dependency PROBLEMS
+  (missing, incompatible, cycles, version mismatch) already appear in
+  list_mods warnings -- do not re-derive them.
+- The patched view is a static evaluation, not the running game; it reports
+  unsupported operations. Harmony results marked dynamic are runtime-resolved
+  and need reading the mod source.`
+
 export function createServer() {
-  const server = new McpServer({ name, version })
+  const server = new McpServer({ name, version }, { instructions })
   registerTools(server)
   return server
 }
@@ -29,6 +49,7 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'search_source',
     {
+      title: 'Search RimWorld source',
       description: 'Search RimWorld source code using regex.',
       inputSchema: z.object({
         query: z.string().describe('Regex pattern.'),
@@ -53,7 +74,7 @@ function registerTools(server: McpServer) {
             'true = only files the game actually loads for the current version (skips old version folders and shadowed files). Default false searches everything.',
           ),
       }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ query, file_pattern, case_sensitive, scope, loaded_only }) =>
       searchSource(sandbox, query, case_sensitive, file_pattern, {
@@ -66,6 +87,7 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'read_file',
     {
+      title: 'Read source file',
       description: 'Read source file.',
       inputSchema: z.object({
         path: z
@@ -88,7 +110,7 @@ function registerTools(server: McpServer) {
           .default(400)
           .describe('Max lines to return.'),
       }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ path, start_line, line_count }) =>
       readFile(sandbox, path, start_line, line_count),
@@ -98,6 +120,7 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'list_directory',
     {
+      title: 'List directory',
       description: 'List contents of a directory.',
       inputSchema: z.object({
         path: z
@@ -112,7 +135,8 @@ function registerTools(server: McpServer) {
           .default(100)
           .describe('Max items to return.'),
       }),
-      annotations: { readOnlyHint: true },
+      outputSchema: listDirectoryOutputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ path, limit }) => listDirectory(sandbox, path, limit),
   )
@@ -121,6 +145,7 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'get_def_details',
     {
+      title: 'Get Def details',
       description: 'Get XML of a Def, with its mod override lineage.',
       inputSchema: z.object({
         defName: z.string().describe('Exact defName (e.g. `Gun_Revolver`).'),
@@ -148,7 +173,7 @@ function registerTools(server: McpServer) {
           ),
       }),
       outputSchema: defDetailsOutputSchema,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ defName, defType, view, mod, dup }) =>
       getDefDetails(db, defName, defType, { view, mod, dup }),
@@ -158,6 +183,7 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'search_defs',
     {
+      title: 'Search Defs',
       description: 'Search Def indices by partial name or label.',
       inputSchema: z.object({
         query: z.string().describe('Case-insensitive keyword.'),
@@ -184,7 +210,7 @@ function registerTools(server: McpServer) {
           ),
       }),
       outputSchema: searchDefsOutputSchema,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ query, defType, mod, limit, dup }) =>
       searchDefs(db, query, defType, mod, limit, dup),
@@ -194,6 +220,7 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'read_csharp_symbol',
     {
+      title: 'Read C# symbol',
       description: 'Read a C# type or method definition.',
       inputSchema: z.object({
         typeName: z
@@ -212,7 +239,7 @@ function registerTools(server: McpServer) {
             'Exact file pick when the type is defined in several files (vanilla + mods). The multi-hit response lists valid values.',
           ),
       }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ typeName, memberName, file_path }) =>
       readCsharpSymbol(db, assetsPath, typeName, memberName, file_path),
@@ -222,27 +249,21 @@ function registerTools(server: McpServer) {
   server.registerTool(
     'list_mods',
     {
+      title: 'List indexed mods',
       description:
-        'List indexed RimWorld mods: load order, packageId, name, source, dependency status and warnings.',
-      inputSchema: z.object({
-        inProfile: z
-          .boolean()
-          .optional()
-          .describe('true = only mods in the current dev profile.'),
-        playerActive: z
-          .boolean()
-          .optional()
-          .describe('true = only mods active in the player game config (diagnostic view).'),
-      }),
-      annotations: { readOnlyHint: true },
+        'List the mods in the current dev profile: load order, packageId, name, source, active folders and warnings.',
+      inputSchema: z.object({}),
+      outputSchema: listModsOutputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ inProfile, playerActive }) => listMods(db, { inProfile, playerActive }),
+    () => listMods(db),
   )
 
   // tool: search patches
   server.registerTool(
     'search_patches',
     {
+      title: 'Search XML patches',
       description:
         'Reverse-lookup XML patch operations: which mod, file and operation patched a def, mod, or op class. The entry point for writing compatibility patches.',
       inputSchema: z.object({
@@ -271,7 +292,7 @@ function registerTools(server: McpServer) {
           .describe('Max results to return.'),
       }),
       outputSchema: searchPatchesOutputSchema,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ defName, packageId, opClass, limit }) =>
       searchPatches(db, { defName, packageId, opClass, limit }),

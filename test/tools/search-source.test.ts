@@ -132,7 +132,6 @@ describe('search-source scope', () => {
       generatedAt: '',
       gameVersion: '1.6',
       profile: { name: 't', base: 'all-dlc' as const, mods: ['m1'], autoOrder: true },
-      playerActivePackageIds: null,
       mods: [
         {
           packageId: 'm1',
@@ -142,7 +141,6 @@ describe('search-source scope', () => {
           assetPath: 'Mods/m1',
           loadOrder: 1,
           inProfile: true,
-          playerActive: false,
           supportedVersions: [],
           loadFolders: {},
           versionDirs: ['1.5'],

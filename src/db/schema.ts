@@ -1,4 +1,4 @@
-// Single source of truth for index.db DDL (schema v4).
+// Single source of truth for index.db DDL (schema v5).
 //
 // All CREATE TABLE statements live here — scripts and repositories must not
 // define tables inline. JSON columns are TEXT parsed in the application
@@ -6,7 +6,7 @@
 
 import type { Database } from 'bun:sqlite'
 
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -15,17 +15,12 @@ CREATE TABLE IF NOT EXISTS mods (
   modId         INTEGER PRIMARY KEY,
   packageId     TEXT UNIQUE NOT NULL,
   name          TEXT,
-  author        TEXT,
   source        TEXT NOT NULL,
-  rootPath      TEXT NOT NULL,
   assetPath     TEXT NOT NULL,
   loadOrder     INTEGER NOT NULL,
   inProfile     INTEGER NOT NULL DEFAULT 0,
-  playerActive  INTEGER NOT NULL DEFAULT 0,
   activeFolders TEXT,
   warnings      TEXT,
-  supportedVersions TEXT,
-  dependencies  TEXT,
   dataCategory  TEXT
 );
 

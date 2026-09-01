@@ -24,24 +24,37 @@ describe('list-directory', () => {
     await write(join(testDir, 'a.txt'), 'content')
     await write(join(testDir, '.hidden'), 'hidden')
 
-    const text = (await listDirectory(sandbox)).content[0].text
+    const result = await listDirectory(sandbox)
 
-    expect(text).toBe('subdir/\na.txt')
+    expect(result.content[0].text).toBe('subdir/\na.txt')
+    expect(result.structuredContent).toEqual({
+      total: 2,
+      results: [
+        { name: 'subdir', type: 'directory' },
+        { name: 'a.txt', type: 'file' },
+      ],
+    })
   })
 
   test('reports truncated listings', async () => {
     await write(join(testDir, 'a.txt'), 'content')
     await write(join(testDir, 'b.txt'), 'content')
 
-    const text = (await listDirectory(sandbox, '', 1)).content[0].text
+    const result = await listDirectory(sandbox, '', 1)
 
-    expect(text).toContain('[TRUNCATED] Showing 1/2 items.')
+    expect(result.content[0].text).toContain('[TRUNCATED] Showing 1/2 items.')
+    // total is the pre-truncation count; results only what was returned
+    expect(result.structuredContent).toEqual({
+      total: 2,
+      results: [{ name: 'a.txt', type: 'file' }],
+    })
   })
 
   test('reports an empty directory', async () => {
-    const text = (await listDirectory(sandbox)).content[0].text
+    const result = await listDirectory(sandbox)
 
-    expect(text).toBe('Directory is empty')
+    expect(result.content[0].text).toBe('Directory is empty')
+    expect(result.structuredContent).toEqual({ total: 0, results: [] })
   })
 
   test('maps filesystem errors to tool-specific errors', async () => {

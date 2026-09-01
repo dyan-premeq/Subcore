@@ -11,17 +11,12 @@ function mod(packageId: string, modId: number, loadOrder: number): ModInsertRow 
   return {
     packageId,
     name: packageId,
-    author: null,
     source: loadOrder === 0 ? 'builtin' : 'workshop',
-    rootPath: '',
     assetPath: loadOrder === 0 ? '' : `Mods/${packageId}`,
     loadOrder,
     inProfile: true,
-    playerActive: false,
     activeFolders: null,
     warnings: [],
-    supportedVersions: ['1.6'],
-    dependencies: [],
     dataCategory: null,
   }
 }
