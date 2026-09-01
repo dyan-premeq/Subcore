@@ -18,6 +18,8 @@ export interface SearchSourceOptions {
   scope?: SearchScope
   /** true = restrict to the manifest's active-corpus files (default false) */
   loadedOnly?: boolean
+  /** max result lines; clamped to MAX_RESULT_LINES (400) */
+  limit?: number
   /** injectable for tests; defaults to dist/mods-manifest.json */
   manifest?: ModsManifest | null
 }
@@ -227,11 +229,12 @@ export async function searchSource(
     return textResponse(truncated)
   }
 
+  const maxLines = Math.min(options.limit ?? MAX_RESULT_LINES, MAX_RESULT_LINES)
   const lines = output.split(/\r?\n/)
-  if (lines.length > MAX_RESULT_LINES) {
-    const truncated = lines.slice(0, MAX_RESULT_LINES)
+  if (lines.length > maxLines) {
+    const truncated = lines.slice(0, maxLines)
     truncated.push(
-      `\n[TRUNCATED] Showing ${MAX_RESULT_LINES}/${lines.length} results.`,
+      `\n[TRUNCATED] Showing ${maxLines}/${lines.length} results.`,
     )
     truncated.push(
       '(Tip: Refine your search query or add a more specific `file_pattern`.)',

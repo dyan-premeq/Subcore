@@ -182,3 +182,58 @@ describe('list-mods detail tier', () => {
     }
   })
 })
+
+describe('list-mods packageId lookup', () => {
+  test('returns the single mod with detail-level info and a single structured row', () => {
+    const result = listMods(db, { packageId: 'alpha.tools' })
+    const text = result.content[0].text
+
+    expect(text).toContain('[1] alpha.tools — alpha.tools (mod) ⚠2')
+    expect(text).toContain('  folders: 1.6, .')
+    expect(text).toContain('  assets: Mods/alpha.tools')
+    expect(text).toContain('  warnings:')
+    expect(text).toContain('    - unsupportedVersion: 1.6 not in supportedVersions')
+    expect(text).toContain('    - loadFolders: unknown folder "Extra"')
+    expect(text).not.toContain('beta.core')
+    expect(text).not.toContain('ludeon.rimworld')
+
+    expect(result.structuredContent).toEqual({
+      total: 1,
+      results: [
+        {
+          packageId: 'alpha.tools',
+          name: 'alpha.tools',
+          source: 'mod',
+          loadOrder: 1,
+          activeFolders: ['1.6', '.'],
+          warnings: [
+            'unsupportedVersion: 1.6 not in supportedVersions',
+            'loadFolders: unknown folder "Extra"',
+          ],
+          assetPath: 'Mods/alpha.tools',
+        },
+      ],
+    })
+  })
+
+  test('detail and page are ignored when packageId is given', () => {
+    const single = listMods(db, { packageId: 'alpha.tools' })
+    const withFlags = listMods(db, {
+      packageId: 'alpha.tools',
+      detail: false,
+      page: 9,
+    })
+
+    expect(withFlags.content[0].text).toBe(single.content[0].text)
+    expect(withFlags.structuredContent).toEqual(single.structuredContent)
+  })
+
+  test('an unknown packageId returns guidance text and empty structuredContent', () => {
+    const result = listMods(db, { packageId: 'nope.mod' })
+
+    expect(result.content[0].text).toBe(
+      'Unknown packageId "nope.mod". Call list_mods without arguments for the overview.',
+    )
+    expect(result.structuredContent).toEqual({ total: 0, results: [] })
+  })
+})

@@ -58,18 +58,18 @@ export async function readCsharpSymbolImpl(
 export async function readCsharpSymbol(
   db: Database,
   sourcePath: string,
-  typeName: string,
+  symbol: string,
   memberName?: string,
   filePath?: string,
 ) {
   // csharp_index stores bare type names only — accept namespace-qualified input
-  typeName = typeName.split('.').pop()!
-  const allRows = findCsharpTypes(db, typeName)
+  symbol = symbol.split('.').pop()!
+  const allRows = findCsharpTypes(db, symbol)
 
   if (allRows.length === 0) {
     const symbolLabel = memberName
-      ? `Member '${memberName}' in type '${typeName}'`
-      : `Type '${typeName}'`
+      ? `Member '${memberName}' in type '${symbol}'`
+      : `Type '${symbol}'`
 
     return {
       ...textResponse(
@@ -89,7 +89,7 @@ export async function readCsharpSymbol(
   // candidates instead of pretending the type does not exist
   if (rows.length === 0) {
     return textResponse(
-      `Type '${typeName}' exists but file_path '${normalizedPath}' matched none of its ${allRows.length} definitions:\n` +
+      `Type '${symbol}' exists but file_path '${normalizedPath}' matched none of its ${allRows.length} definitions:\n` +
         formatDefinitionList(allRows),
     )
   }
@@ -98,7 +98,7 @@ export async function readCsharpSymbol(
   // sources so the caller can re-invoke with file_path (design doc §6.7)
   if (rows.length > 1) {
     return textResponse(
-      `Type '${typeName}' is defined in ${rows.length} files. ` +
+      `Type '${symbol}' is defined in ${rows.length} files. ` +
         `Call read_csharp_symbol again with file_path to pick one:\n` +
         formatDefinitionList(rows),
     )
@@ -110,7 +110,7 @@ export async function readCsharpSymbol(
     // the type exists but the requested member does not
     return {
       ...textResponse(
-        `Member '${memberName}' in type '${typeName}' not found in index. Please check the name.`,
+        `Member '${memberName}' in type '${symbol}' not found in index. Please check the name.`,
       ),
     }
   }

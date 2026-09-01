@@ -28,6 +28,7 @@ Routing:
 - "Who changed this def?" -> search_patches (filters: defName / packageId / opClass)
 - "Who hooks this C# method?" -> search_harmony (Harmony patches)
 - What is in the profile -> list_mods (overview; detail:true + page for per-mod folders/assets/warnings)
+- structuredContent: search_defs/search_patches/search_harmony/list_mods/list_directory/get_def_details return it; search_source/read_file/read_csharp_symbol are text-only.
 
 Data boundaries:
 - Mod dependencies / loadAfter / incompatibleWith are not indexed. Read the
@@ -73,13 +74,21 @@ function registerTools(server: McpServer) {
           .describe(
             'true = only files the game actually loads for the current version (skips old version folders and shadowed files). Default false searches everything.',
           ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(400)
+          .default(400)
+          .describe('Max result lines to return; output beyond this is truncated.'),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ query, file_pattern, case_sensitive, scope, loaded_only }) =>
+    ({ query, file_pattern, case_sensitive, scope, loaded_only, limit }) =>
       searchSource(sandbox, query, case_sensitive, file_pattern, {
         scope,
         loadedOnly: loaded_only,
+        limit,
       }),
   )
 
@@ -223,10 +232,10 @@ function registerTools(server: McpServer) {
       title: 'Read C# symbol',
       description: 'Read a C# type or method definition.',
       inputSchema: z.strictObject({
-        typeName: z
+        symbol: z
           .string()
           .describe(
-            'Exact type name (e.g. "ThingDef", "JobDriver"). Namespace-qualified names are accepted and matched by bare type name.',
+            "Type name, bare or namespace-qualified (e.g. 'FoodUtility', 'Kiiro_Event.KiiroEventSettings'). Use memberName to pick one member.",
           ),
         memberName: z
           .string()
@@ -243,8 +252,8 @@ function registerTools(server: McpServer) {
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ typeName, memberName, file_path }) =>
-      readCsharpSymbol(db, assetsPath, typeName, memberName, file_path),
+    ({ symbol, memberName, file_path }) =>
+      readCsharpSymbol(db, assetsPath, symbol, memberName, file_path),
   )
 
   // tool: list mods
@@ -267,11 +276,17 @@ function registerTools(server: McpServer) {
           .min(1)
           .default(1)
           .describe('Detail-mode page number (20 mods per page). Only used with detail:true.'),
+        packageId: z
+          .string()
+          .optional()
+          .describe(
+            'Single-mod lookup: full detail (folders, assets, warnings) for just this mod. Overrides detail/page.',
+          ),
       }),
       outputSchema: listModsOutputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ detail, page }) => listMods(db, { detail, page }),
+    ({ detail, page, packageId }) => listMods(db, { detail, page, packageId }),
   )
 
   // tool: search patches

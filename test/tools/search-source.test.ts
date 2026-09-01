@@ -85,6 +85,20 @@ describe('search-source', () => {
     expect(text).toContain('[TRUNCATED] Showing 400/')
   })
 
+  test('a smaller limit caps result lines and the truncation hint reports it', async () => {
+    const content = Array.from({ length: 450 }, (_, i) => `hit ${i}`).join('\n')
+    await write(join(testDir, 'many.txt'), content)
+
+    const text = (
+      await searchSource(sandbox, 'hit', false, undefined, { limit: 30 })
+    ).content[0].text as string
+
+    // line-based like the 400 cap: rg's --heading filename line takes a slot
+    expect(text).toContain('[TRUNCATED] Showing 30/451 results.')
+    const resultLines = text.split(/\r?\n/).filter(line => line.includes('hit '))
+    expect(resultLines).toHaveLength(29)
+  })
+
   test('limits output by byte size', async () => {
     await write(join(testDir, 'large.txt'), 'x'.repeat(120 * 1024))
 

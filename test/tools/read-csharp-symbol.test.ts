@@ -132,7 +132,7 @@ describe('read-csharp-symbol', () => {
     expect(text).toContain('[SYSTEM NOTE]')
   })
 
-  test('resolves a namespace-qualified typeName by its bare tail', async () => {
+  test('resolves a namespace-qualified symbol by its bare tail', async () => {
     const text = (
       await readCsharpSymbol(db, sourcePath, 'Some.Namespace.TypeX')
     ).content[0].text
@@ -210,3 +210,91 @@ describe('read-csharp-symbol', () => {
     )
   })
 })
+
+describe('read_csharp_symbol over stdio', () => {
+  test(
+    'a legacy typeName argument is rejected by strictObject and the rich error names symbol',
+    async () => {
+      const proc = Bun.spawn(['bun', 'src/stdio.ts'], {
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'ignore',
+      })
+
+      try {
+        const nextMessage = lineReader(proc)
+
+        proc.stdin.write(
+          [
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'initialize',
+              params: {
+                protocolVersion: '2026-07-28',
+                capabilities: {},
+                clientInfo: { name: 'test', version: '0' },
+              },
+            }),
+            JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 2,
+              method: 'tools/call',
+              params: {
+                name: 'read_csharp_symbol',
+                arguments: { typeName: 'Thing' },
+              },
+            }),
+          ]
+            .map(line => line + '\n')
+            .join(''),
+        )
+        proc.stdin.flush()
+
+        let response:
+          | {
+              error?: unknown
+              result?: { isError?: unknown; content?: Array<{ text?: unknown }> }
+            }
+          | undefined
+        while (!response) {
+          const msg = await nextMessage()
+          if (msg.id === 2) response = msg
+        }
+
+        expect(response.error).toBeUndefined()
+        expect(response.result!.isError).toBe(true)
+        const text = response.result!.content![0]!.text as string
+        expect(text).toContain('Input validation error')
+        expect(text).toContain('read_csharp_symbol')
+        expect(text).toContain('"typeName"')
+        expect(text).toContain('symbol')
+      } finally {
+        proc.kill()
+      }
+    },
+    60_000,
+  )
+})
+
+/** Reads newline-delimited JSON-RPC messages from the server's stdout. */
+function lineReader(proc: Bun.Subprocess<'pipe', 'pipe', 'ignore'>) {
+  const reader = proc.stdout.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  return async function nextMessage(): Promise<any> {
+    for (;;) {
+      let newline: number
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim()
+        buffer = buffer.slice(newline + 1)
+        if (line) return JSON.parse(line)
+      }
+      const { done, value } = await reader.read()
+      if (done) throw new Error('server exited before answering')
+      buffer += decoder.decode(value, { stream: true })
+    }
+  }
+}

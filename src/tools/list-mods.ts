@@ -10,6 +10,8 @@ const DETAIL_PAGE_SIZE = 20
 export interface ListModsOptions {
   detail?: boolean
   page?: number
+  /** single-mod lookup; overrides detail/page */
+  packageId?: string
 }
 
 /** Registered as outputSchema for list_mods in server.ts. */
@@ -46,6 +48,25 @@ export function listMods(
           'import-mods has been run (base packages appear after `bun run build`).',
       ),
       structuredContent: { total: 0, results: [] },
+    }
+  }
+
+  if (options.packageId !== undefined) {
+    const wanted = options.packageId.toLowerCase()
+    const row = rows.find(r => r.packageId.toLowerCase() === wanted)
+
+    if (!row) {
+      return {
+        ...textResponse(
+          `Unknown packageId "${options.packageId}". Call list_mods without arguments for the overview.`,
+        ),
+        structuredContent: { total: 0, results: [] },
+      }
+    }
+
+    return {
+      ...textResponse(detailLines(row).join('\n')),
+      structuredContent: { total: 1, results: [fullRow(row)] },
     }
   }
 
