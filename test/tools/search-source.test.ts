@@ -125,7 +125,32 @@ describe('search-source scope', () => {
     expect(unknown.guidance).toContain('nope.mod')
   })
 
+  test('scope "Mods/<packageId>" (any case) resolves like the bare packageId', async () => {
+    const bare = await searchSourceImpl(sandbox, 'target_', false, undefined, {
+      scope: 'm1',
+    })
+    expect(bare.output).toContain('active.xml')
 
+    // rg traverses in parallel: compare sorted lines, not raw output order
+    const sorted = (s: string) => s.split('\n').sort().join('\n')
+    for (const scope of ['Mods/m1', 'mods/m1', 'MODS/m1']) {
+      const prefixed = await searchSourceImpl(sandbox, 'target_', false, undefined, { scope })
+      expect(sorted(prefixed.output)).toBe(sorted(bare.output))
+    }
+  })
+
+  test('unknown scope guidance lists the four valid forms', async () => {
+    const unknown = await searchSourceImpl(sandbox, 'target_', false, undefined, {
+      scope: 'Source',
+    })
+    expect(unknown.guidance).toContain('Unknown scope "Source"')
+    expect(unknown.guidance).toContain('Valid:')
+    expect(unknown.guidance).toContain("'all'")
+    expect(unknown.guidance).toContain("'vanilla'")
+    expect(unknown.guidance).toContain("'mods'")
+    expect(unknown.guidance).toContain('packageId')
+    expect(unknown.guidance).not.toContain('dist/')
+  })
 
   test('loaded_only=true excludes non-active version folders and shadowed files', async () => {
     const manifest = {

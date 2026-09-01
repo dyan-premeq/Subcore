@@ -44,7 +44,12 @@ export async function searchSourceImpl(
   // search pattern + paths
   args.push('-e', query)
 
-  const resolved = resolveScopePaths(sandbox.basePath, options.scope ?? 'all')
+  // Tolerate the observed misuse "Mods/<packageId>": strip the prefix once
+  // so both scope consumers (path resolution, loaded_only exclusions) see
+  // the bare packageId.
+  const scope = options.scope?.replace(/^mods\//i, '') ?? 'all'
+
+  const resolved = resolveScopePaths(sandbox.basePath, scope)
   if (resolved.guidance !== undefined) {
     return { output: '', exceededOutputLimit: false, guidance: resolved.guidance }
   }
@@ -63,7 +68,7 @@ export async function searchSourceImpl(
 
   const exclusions = options.loadedOnly
     ? resolveLoadedOnlyExclusions(
-        options.scope ?? 'all',
+        scope,
         options.manifest !== undefined ? options.manifest : readManifest(),
       )
     : []
@@ -143,9 +148,9 @@ function resolveScopePaths(sandboxRoot: string, scope: SearchScope): ScopeResolu
   if (!existsSync(join(modsRoot, escapePackageDirName(scope)))) {
     return {
       guidance:
-        `Scope "${scope}" not found in dist/assets/Mods. ` +
-        'List available mods with `list_mods`, or add the packageId to your profile ' +
-        'and re-run import-mods + build.',
+        `Unknown scope "${scope}". ` +
+        `Valid: 'all' (default), 'vanilla' (Defs + Source), 'mods', or a packageId ` +
+        `(e.g. 'ancot.kiirorace') — list them with list_mods.`,
     }
   }
   return { paths: [dir] }
