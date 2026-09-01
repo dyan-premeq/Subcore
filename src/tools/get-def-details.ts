@@ -5,6 +5,7 @@ import { textResponse } from '../utils/mcp-response'
 import {
   getDefDetailsRows,
   getDefLineage,
+  searchDefsEffective,
   type DefDetailResultRow,
   type DefLineageRow,
 } from '../repositories/defs-repo'
@@ -59,9 +60,18 @@ export function getDefDetails(
   const rows = getDefDetailsRows(db, defName, defType, { view, mod, dup })
 
   if (rows.length === 0) {
-    const errorText = `Def \`${defName}\`${
+    let errorText = `Def \`${defName}\`${
       defType ? ` (type: ${defType})` : ''
     } not found. Try using 'search_source' to verify the exact name.`
+
+    // did-you-mean: LIKE over defName/label, defType filter relaxed (R6c)
+    const candidates = searchDefsEffective(db, defName, undefined, undefined, 5)
+    if (candidates.length > 0) {
+      const suggestions = candidates
+        .map(c => `${c.defName} (${c.defType}, ${c.packageId})`)
+        .join(', ')
+      errorText += `\nDid you mean: ${suggestions}`
+    }
 
     return {
       isError: true,

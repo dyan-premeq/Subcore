@@ -132,6 +132,54 @@ describe('get-def-details', () => {
     expect(result.content[0].text).toContain('not found')
   })
 
+  test('not-found suggests near-name defs (did-you-mean)', () => {
+    const result = getDefDetails(db, 'TestGu')
+    const text = result.content[0].text as string
+
+    expect(result.isError).toBe(true)
+    expect(text).toContain('not found')
+    expect(text).toContain('Did you mean: TestGun (ThingDef, beta.mod)')
+  })
+
+  test('wrong defType still suggests the def (no type filter on did-you-mean)', () => {
+    const text = getDefDetails(db, 'TestGun', 'NotARealDefType').content[0]
+      .text as string
+
+    expect(text).toContain('Did you mean: TestGun (ThingDef, beta.mod)')
+  })
+
+  test('did-you-mean lists at most five candidates', () => {
+    replaceDefs(
+      db,
+      ['A', 'B', 'C', 'D', 'E', 'F'].map(s => ({
+        defName: `DidYouMean_${s}`,
+        defType: 'ThingDef',
+        modId: 1,
+        loadOrder: 0,
+        label: null,
+        filePath: null,
+        mayRequire: null,
+        rawPayload: '{}',
+        mergedPayload: '{}',
+      })),
+    )
+
+    const text = getDefDetails(db, 'DidYouMean').content[0].text as string
+
+    expect(text).toContain('DidYouMean_A (ThingDef, ludeon.rimworld)')
+    expect(text).toContain('DidYouMean_E (ThingDef, ludeon.rimworld)')
+    expect(text).not.toContain('DidYouMean_F')
+  })
+
+  test('not-found without candidates keeps the plain error text', () => {
+    const result = getDefDetails(db, 'ZZZ_No_Such_Def')
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toBe(
+      `Def \`ZZZ_No_Such_Def\` not found. Try using 'search_source' to verify the exact name.`,
+    )
+  })
+
   test('renders raw and merged views', () => {
     const raw = getDefDetails(db, 'TestGun', 'ThingDef', { view: 'raw' }).content[0]
       .text as string

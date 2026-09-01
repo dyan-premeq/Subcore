@@ -157,7 +157,26 @@ describe('search-defs', () => {
   test('returns structuredContent with total 0 when nothing matches', () => {
     const result = searchDefs(db, 'MissingDef')
 
-    expect(result.content[0].text).toBe('No results found. Try a shorter keyword.')
+    expect(result.content[0].text).toBe(
+      `No defs matched "MissingDef"\n` +
+        `defType is the literal XML tag (e.g. 'AlienRace.ThingDef_AlienRace'); for an exact name try find_refs.`,
+    )
     expect(result.structuredContent).toEqual({ total: 0, results: [] })
+  })
+
+  test('empty result echoes defType and mod filters', () => {
+    const text = searchDefs(
+      db,
+      'MissingDef',
+      'AlienRace.ThingDef_AlienRace',
+      'mehni.pickupandhaul',
+    ).content[0].text as string
+
+    expect(text).toContain(
+      `No defs matched "MissingDef" (defType 'AlienRace.ThingDef_AlienRace', mod 'mehni.pickupandhaul')`,
+    )
+    expect(text).toContain(
+      `defType is the literal XML tag (e.g. 'AlienRace.ThingDef_AlienRace'); for an exact name try find_refs.`,
+    )
   })
 })

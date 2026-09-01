@@ -69,8 +69,14 @@ export function searchDefs(
   }
 
   if (total === 0) {
+    const filters = [defType ? `defType '${defType}'` : '', mod ? `mod '${mod}'` : '']
+      .filter(Boolean)
+      .join(', ')
     return {
-      ...textResponse('No results found. Try a shorter keyword.'),
+      ...textResponse(
+        `No defs matched "${query}"${filters ? ` (${filters})` : ''}\n` +
+          `defType is the literal XML tag (e.g. 'AlienRace.ThingDef_AlienRace'); for an exact name try find_refs.`,
+      ),
       structuredContent,
     }
   }

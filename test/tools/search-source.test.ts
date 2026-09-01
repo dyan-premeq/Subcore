@@ -41,14 +41,39 @@ describe('search-source', () => {
     expect(result.output).not.toContain('test.js')
   })
 
-  test('returns guidance when nothing matches', async () => {
+  test('returns an empty-result message echoing the query and scope', async () => {
     await write(join(testDir, 'test.ts'), 'content')
 
     const text = (await searchSource(sandbox, 'missing')).content[0].text
 
+    expect(text).toBe(`No matches for /missing/ in scope 'all'`)
+  })
+
+  test('empty result echoes file_pattern without the glob note for a bare pattern', async () => {
+    await write(join(testDir, 'test.ts'), 'content')
+
+    const text = (await searchSource(sandbox, 'missing', false, '*.ts')).content[0]
+      .text as string
+
+    expect(text).toBe(`No matches for /missing/ in scope 'all', file_pattern '*.ts'`)
+  })
+
+  test('single-star glob crossing "/" gets the gitignore-semantics note', async () => {
+    const text = (await searchSource(sandbox, 'missing', false, 'Mods/m1/*')).content[0]
+      .text as string
+
     expect(text).toBe(
-      'No results found. Try adjusting your search query or file pattern.',
+      `No matches for /missing/ in scope 'all', file_pattern 'Mods/m1/*'\n` +
+        `Note: globs use gitignore semantics — a single '*' does not cross '/'; to limit to one mod use scope:'<packageId>' instead.`,
     )
+  })
+
+  test('double-star glob does not get the gitignore-semantics note', async () => {
+    const text = (
+      await searchSource(sandbox, 'missing', false, 'Mods/m1/**', { scope: 'vanilla' })
+    ).content[0].text as string
+
+    expect(text).toBe(`No matches for /missing/ in scope 'vanilla', file_pattern 'Mods/m1/**'`)
   })
 
   test('limits output by result count', async () => {

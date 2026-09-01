@@ -207,9 +207,16 @@ export async function searchSource(
   }
 
   if (output.length === 0 && !exceededOutputLimit) {
-    return textResponse(
-      'No results found. Try adjusting your search query or file pattern.',
-    )
+    let message = `No matches for /${query}/ in scope '${options.scope ?? 'all'}'`
+    if (filePattern) {
+      message += `, file_pattern '${filePattern}'`
+    }
+    if (filePattern?.includes('/') && !filePattern.includes('**')) {
+      message +=
+        "\nNote: globs use gitignore semantics — a single '*' does not cross '/';" +
+        " to limit to one mod use scope:'<packageId>' instead."
+    }
+    return textResponse(message)
   }
 
   if (exceededOutputLimit) {
