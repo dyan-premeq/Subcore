@@ -1,13 +1,8 @@
 import type { Database } from 'bun:sqlite'
-import type { CsharpIndexRow, SqlNamedParams } from '../types'
 import { file } from 'bun'
 import { join } from 'node:path'
 import { textResponse } from '../utils/mcp-response'
-import { findCsharpTypes } from '../repositories/csharp-repo'
-
-type IndexRow = Pick<CsharpIndexRow, 'filePath' | 'startLine'> & {
-  packageId: string | null
-}
+import { findCsharpTypes, type CsharpSearchRow } from '../repositories/csharp-repo'
 
 interface CodeBlock {
   startLine: number
@@ -26,13 +21,10 @@ interface CSharpSymbolResult {
 const MAX_LINES_THRESHOLD = 400
 
 export async function readCsharpSymbolImpl(
-  db: Database,
   sourcePath: string,
-  typeName: string,
+  rows: CsharpSearchRow[],
   memberName?: string,
-  filePath?: string,
 ): Promise<CSharpSymbolResult[]> {
-  const rows = getCsharpIndexRows(db, typeName, filePath)
   const results: CSharpSymbolResult[] = []
 
   for (const row of rows) {
@@ -70,11 +62,13 @@ export async function readCsharpSymbol(
   memberName?: string,
   filePath?: string,
 ) {
-  const rows = getCsharpIndexRows(db, typeName, filePath)
+  // csharp_index stores bare type names only — accept namespace-qualified input
+  typeName = typeName.split('.').pop()!
+  const allRows = findCsharpTypes(db, typeName)
 
-  if (rows.length === 0) {
+  if (allRows.length === 0) {
     const symbolLabel = memberName
-      ? `Method '${memberName}' in type '${typeName}'`
+      ? `Member '${memberName}' in type '${typeName}'`
       : `Type '${typeName}'`
 
     return {
@@ -84,33 +78,39 @@ export async function readCsharpSymbol(
     }
   }
 
-  // multiple definitions (vanilla + mods, or several mods): list the
-  // sources so the caller can re-invoke with file_path (design doc §6.7)
-  if (rows.length > 1) {
-    const lines = rows.map(
-      row =>
-        `[${row.packageId ?? 'vanilla'}] ${row.filePath} (line ${row.startLine + 1})`,
-    )
+  const normalizedPath =
+    filePath === undefined ? undefined : normalizeFilePath(filePath)
+  const rows =
+    normalizedPath === undefined
+      ? allRows
+      : allRows.filter(row => row.filePath === normalizedPath)
+
+  // file_path given but matched none of the type's definitions: show the
+  // candidates instead of pretending the type does not exist
+  if (rows.length === 0) {
     return textResponse(
-      `Type '${typeName}' is defined in ${rows.length} files. ` +
-        `Call read_csharp_symbol again with file_path to pick one:\n` +
-        lines.join('\n'),
+      `Type '${typeName}' exists but file_path '${normalizedPath}' matched none of its ${allRows.length} definitions:\n` +
+        formatDefinitionList(allRows),
     )
   }
 
-  const results = await readCsharpSymbolImpl(
-    db,
-    sourcePath,
-    typeName,
-    memberName,
-    filePath,
-  )
+  // multiple definitions (vanilla + mods, or several mods): list the
+  // sources so the caller can re-invoke with file_path (design doc §6.7)
+  if (rows.length > 1) {
+    return textResponse(
+      `Type '${typeName}' is defined in ${rows.length} files. ` +
+        `Call read_csharp_symbol again with file_path to pick one:\n` +
+        formatDefinitionList(rows),
+    )
+  }
+
+  const results = await readCsharpSymbolImpl(sourcePath, rows, memberName)
 
   if (results.length === 0) {
     // the type exists but the requested member does not
     return {
       ...textResponse(
-        `Method '${memberName}' in type '${typeName}' not found in index. Please check the name.`,
+        `Member '${memberName}' in type '${typeName}' not found in index. Please check the name.`,
       ),
     }
   }
@@ -144,12 +144,20 @@ export async function readCsharpSymbol(
 }
 
 // #region Helpers
-function getCsharpIndexRows(
-  db: Database,
-  typeName: string,
-  filePath?: string,
-): IndexRow[] {
-  return findCsharpTypes(db, typeName, filePath)
+function normalizeFilePath(filePath: string): string {
+  return filePath
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .replace(/^dist\/assets\//, '')
+}
+
+function formatDefinitionList(rows: CsharpSearchRow[]): string {
+  return rows
+    .map(
+      row =>
+        `[${row.packageId ?? 'vanilla'}] ${row.filePath} (line ${row.startLine + 1})`,
+    )
+    .join('\n')
 }
 
 function extractNamedMethods(
@@ -159,7 +167,7 @@ function extractNamedMethods(
   memberName: string,
 ): CodeBlock[] {
   const blocks: CodeBlock[] = []
-  const memberPattern = new RegExp(`\\b${escapeRegExp(memberName)}\\s*\\(`)
+  const memberPattern = new RegExp(`\\b${escapeRegExp(memberName)}\\b`)
   const typeEndLine = typeStartLine + typeLineCount
   let depth = 0
 

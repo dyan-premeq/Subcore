@@ -35,28 +35,16 @@ export function replaceCsharpIndex(db: Database, rows: CsharpInsertRow[]): void 
   })(rows)
 }
 
-export function findCsharpTypes(
-  db: Database,
-  typeName: string,
-  filePath?: string,
-): CsharpSearchRow[] {
-  const clauses = ['c.typeName = $typeName']
-  const params: SqlNamedParams = { $typeName: typeName }
-
-  if (filePath !== undefined) {
-    clauses.push('c.filePath = $filePath')
-    params.$filePath = filePath
-  }
-
+export function findCsharpTypes(db: Database, typeName: string): CsharpSearchRow[] {
   return db
     .query<CsharpSearchRow, SqlNamedParams>(
       `
       SELECT c.typeName, c.filePath, c.startLine, c.modId, m.packageId
       FROM csharp_index c
       LEFT JOIN mods m ON m.modId = c.modId
-      WHERE ${clauses.join(' AND ')}
+      WHERE c.typeName = $typeName
       ORDER BY c.filePath
     `,
     )
-    .all(params)
+    .all({ $typeName: typeName })
 }

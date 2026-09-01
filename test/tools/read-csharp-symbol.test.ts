@@ -54,6 +54,13 @@ beforeAll(async () => {
     ['Source/Two/Option.cs', 'public class Option\n{\n}'],
     ['Mods/test.mod/Source/Option.cs', 'public class Option\n{\n}'],
     [
+      'Source/TypeX.cs',
+      `public class TypeX
+{
+    public static int SomeField;
+}`,
+    ],
+    [
       'Source/LargeType.cs',
       `public class LargeType
 {
@@ -125,13 +132,81 @@ describe('read-csharp-symbol', () => {
     expect(text).toContain('[SYSTEM NOTE]')
   })
 
+  test('resolves a namespace-qualified typeName by its bare tail', async () => {
+    const text = (
+      await readCsharpSymbol(db, sourcePath, 'Some.Namespace.TypeX')
+    ).content[0].text
+
+    expect(text).toContain('// File: Source/TypeX.cs')
+    expect(text).toContain('public class TypeX')
+  })
+
+  test('normalizes file_path variants (./ prefix, backslashes, dist/assets/)', async () => {
+    const dotSlash = (
+      await readCsharpSymbol(
+        db,
+        sourcePath,
+        'Option',
+        undefined,
+        './Source/Two/Option.cs',
+      )
+    ).content[0].text
+    expect(dotSlash).toContain('// File: Source/Two/Option.cs')
+
+    const backslashes = (
+      await readCsharpSymbol(
+        db,
+        sourcePath,
+        'Option',
+        undefined,
+        'Mods\\test.mod\\Source\\Option.cs',
+      )
+    ).content[0].text
+    expect(backslashes).toContain('// File: Mods/test.mod/Source/Option.cs')
+
+    const assetsPrefix = (
+      await readCsharpSymbol(
+        db,
+        sourcePath,
+        'Option',
+        undefined,
+        'dist/assets/Source/One/Option.cs',
+      )
+    ).content[0].text
+    expect(assetsPrefix).toContain('// File: Source/One/Option.cs')
+  })
+
+  test('lists candidates when file_path matches none of the definitions', async () => {
+    const text = (
+      await readCsharpSymbol(
+        db,
+        sourcePath,
+        'Option',
+        undefined,
+        'Source/Nope/Option.cs',
+      )
+    ).content[0].text
+
+    expect(text).toContain(
+      "file_path 'Source/Nope/Option.cs' matched none of its 3 definitions",
+    )
+    expect(text).toContain('[vanilla] Source/One/Option.cs (line 1)')
+  })
+
+  test('renders a field declaration member', async () => {
+    const text = (await readCsharpSymbol(db, sourcePath, 'TypeX', 'SomeField'))
+      .content[0].text
+
+    expect(text).toContain('public static int SomeField;')
+  })
+
   test('reports a missing member', async () => {
     const text = (
       await readCsharpSymbol(db, sourcePath, 'Thing', 'MissingMethod')
     ).content[0].text
 
     expect(text).toContain(
-      "Method 'MissingMethod' in type 'Thing' not found in index",
+      "Member 'MissingMethod' in type 'Thing' not found in index",
     )
   })
 })
