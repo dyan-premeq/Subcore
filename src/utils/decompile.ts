@@ -11,7 +11,8 @@ import { basename, join } from 'node:path'
 export interface DecompileStats {
   decompiled: number
   skipped: number
-  failed: number
+  /** Basenames of dlls ilspycmd failed on; drives mod.warnings (design doc §3 R2). */
+  failed: string[]
 }
 
 const DECOMPILED_DIR = 'Source-decompiled'
@@ -46,7 +47,7 @@ export function decompileAssemblies(
   destRoot: string,
   full = false,
 ): DecompileStats {
-  const stats: DecompileStats = { decompiled: 0, skipped: 0, failed: 0 }
+  const stats: DecompileStats = { decompiled: 0, skipped: 0, failed: [] }
 
   for (const relativeDll of assemblies) {
     const dllName = basename(relativeDll)
@@ -82,7 +83,7 @@ export function decompileAssemblies(
       console.warn(
         `[decompile] ilspycmd failed on ${relativeDll} (exit ${result.exitCode}) — skipped.`,
       )
-      stats.failed += 1
+      stats.failed.push(dllName)
       continue
     }
 

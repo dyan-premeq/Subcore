@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, utimesSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { write } from 'bun'
@@ -173,5 +172,83 @@ describe('import-mods', () => {
     // the Harmony library itself is never decompiled
     expect(existsSync(join(alphaDist, 'Source-decompiled/0Harmony.decompiled.cs'))).toBe(false)
   })
+
+  test('failed decompiles land in the manifest warnings with dll names', async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'rimsage-import-decomp-fail-'))
+    try {
+      const result = await importMods({
+        gameRoot,
+        gameVersion: '1.6.4871',
+        workshopRoot: join(gameRoot, 'workshop'),
+        modsConfigPath,
+        profilePath: join(import.meta.dir, '../fixtures/profiles/dev-profile.json'),
+        distModsPath: join(dist, 'assets/Mods'),
+        manifestPath: join(dist, 'mods-manifest.json'),
+        ilspyCmd: writeFailingIlspy(dist),
+      })
+
+      // beta.core: Assemblies/Beta.dll + Assemblies/Sub/Nested.dll, both attempted
+      const beta = result.manifest.mods.find(mod => mod.packageId === 'beta.core')!
+      const warning = beta.warnings.find(w => w.includes('failed to decompile'))
+      expect(warning).toMatch(/^2 assembly\(ies\) failed to decompile: /)
+      expect(warning).toContain('Beta.dll')
+      expect(warning).toContain('Nested.dll')
+
+      // no Assemblies -> no decompile warning
+      const gamma = result.manifest.mods.find(mod => mod.packageId === 'gamma.conditional')!
+      expect(gamma.warnings.some(w => w.includes('decompil'))).toBe(false)
+    } finally {
+      await rmTemp(dist)
+    }
+  })
+
+  test('missing ilspycmd: mods with assemblies get the not-installed warning', async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'rimsage-import-decomp-missing-'))
+    try {
+      const result = await importMods({
+        gameRoot,
+        gameVersion: '1.6.4871',
+        workshopRoot: join(gameRoot, 'workshop'),
+        modsConfigPath,
+        profilePath: join(import.meta.dir, '../fixtures/profiles/dev-profile.json'),
+        distModsPath: join(dist, 'assets/Mods'),
+        manifestPath: join(dist, 'mods-manifest.json'),
+        ilspyCmd: null,
+      })
+
+      const beta = result.manifest.mods.find(mod => mod.packageId === 'beta.core')!
+      expect(beta.warnings).toContain('assemblies not decompiled (ilspycmd not installed)')
+
+      // gamma.conditional has no Assemblies -> untouched
+      const gamma = result.manifest.mods.find(mod => mod.packageId === 'gamma.conditional')!
+      expect(gamma.warnings.some(w => w.includes('ilspycmd'))).toBe(false)
+    } finally {
+      await rmTemp(dist)
+    }
+  })
+
+  test('regression: nothing failed -> warnings stay discovery-only', async () => {
+    const result = await run()
+    const withAssemblies = new Set(['beta.core', 'alpha.tools'])
+    for (const mod of result.manifest.mods) {
+      expect(mod.warnings.some(w => w.includes('failed to decompile'))).toBe(false)
+      if (!withAssemblies.has(mod.packageId)) {
+        expect(mod.warnings.some(w => w.includes('ilspycmd'))).toBe(false)
+      }
+    }
+  })
 })
+
+/** An ilspycmd stand-in that always exits 1, exercising the decompile-failure path. */
+function writeFailingIlspy(dir: string): string {
+  if (process.platform === 'win32') {
+    const script = join(dir, 'failing-ilspy.cmd')
+    writeFileSync(script, '@exit /b 1\r\n')
+    return script
+  }
+  const script = join(dir, 'failing-ilspy.sh')
+  writeFileSync(script, '#!/bin/sh\nexit 1\n')
+  chmodSync(script, 0o755)
+  return script
+}
 

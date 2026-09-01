@@ -17,7 +17,7 @@ describe('decompile', () => {
 
       // 'definitely-not-installed' never spawns: the skip happens first
       const stats = decompileAssemblies('definitely-not-installed', ['Assemblies/0Harmony.dll'], dir)
-      expect(stats).toEqual({ decompiled: 0, skipped: 1, failed: 0 })
+      expect(stats).toEqual({ decompiled: 0, skipped: 1, failed: [] })
     } finally {
       await rmTemp(dir)
     }
@@ -57,7 +57,7 @@ describe('decompile', () => {
       utimesSync(join(dir, 'Assemblies/ModAssembly.dll'), new Date(), new Date(Date.now() + 5000))
 
       const stats = decompileAssemblies(fakeIlspy, ['Assemblies/ModAssembly.dll'], dir)
-      expect(stats).toEqual({ decompiled: 1, skipped: 0, failed: 0 })
+      expect(stats).toEqual({ decompiled: 1, skipped: 0, failed: [] })
 
       const stripped = readFileSync(outPath, 'utf8')
       const ilLines = stripped.split('\n').filter((line) => /^\s*\/\/IL_[0-9A-Fa-f]+:/.test(line))
@@ -112,7 +112,7 @@ describe('decompile', () => {
       writeFileSync(join(dir, 'Assemblies/Bad.dll'), 'not a dll')
 
       const stats = decompileAssemblies(ilspy!, ['Assemblies/Bad.dll'], dir)
-      expect(stats.failed).toBe(1)
+      expect(stats.failed).toEqual(['Bad.dll'])
       // ilspycmd may pre-create the output dir; no usable output may exist
       expect(existsSync(join(dir, 'Source-decompiled/Bad.decompiled.cs'))).toBe(false)
     } finally {

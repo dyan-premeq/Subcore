@@ -44,6 +44,8 @@ export interface ImportModsOptions {
   distModsPath?: string
   manifestPath?: string
   full?: boolean
+  /** Overrides findIlspycmd(); null simulates a missing ilspycmd (tests). */
+  ilspyCmd?: string | null
 }
 
 export interface ImportModsResult {
@@ -68,6 +70,7 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
     distModsPath = modsAssetPath,
     manifestPath = modsManifestPath,
     full = false,
+    ilspyCmd = findIlspycmd(),
   } = options
 
   console.log('Discovering mods...')
@@ -101,7 +104,6 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
   let skippedFiles = 0
   const profilePackages = new Set(resolved.ordered.map(mod => mod.packageId))
 
-  const ilspyCmd = findIlspycmd()
   if (!ilspyCmd) {
     console.warn(
       '[decompile] ilspycmd not found — mod Assemblies will not be decompiled (optional; dotnet tool install -g ilspycmd).',
@@ -116,6 +118,7 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
     let effectiveFiles: string[] = []
     let shadowedFiles: string[] = []
     let activeFolders: string[] = []
+    const decompileWarnings: string[] = []
 
     if (isCommunity) {
       const dirName = escapePackageDirName(mod.packageId)
@@ -131,14 +134,21 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
       effectiveFiles = effective.effective
       shadowedFiles = effective.shadowed
 
+      const assemblies = computeEffectiveAssemblies(mod.rootPath, activeFolders)
       if (ilspyCmd) {
-        const assemblies = computeEffectiveAssemblies(mod.rootPath, activeFolders)
         const stats = decompileAssemblies(ilspyCmd, assemblies, destRoot, full)
-        if (stats.decompiled + stats.failed > 0) {
+        if (stats.decompiled + stats.failed.length > 0) {
           console.log(
-            `[decompile] ${mod.packageId}: ${stats.decompiled} assemblies decompiled, ${stats.skipped} skipped, ${stats.failed} failed.`,
+            `[decompile] ${mod.packageId}: ${stats.decompiled} assemblies decompiled, ${stats.skipped} skipped, ${stats.failed.length} failed.`,
           )
         }
+        if (stats.failed.length > 0) {
+          decompileWarnings.push(
+            `${stats.failed.length} assembly(ies) failed to decompile: ${stats.failed.join(', ')}`,
+          )
+        }
+      } else if (assemblies.length > 0) {
+        decompileWarnings.push('assemblies not decompiled (ilspycmd not installed)')
       }
     }
 
@@ -150,6 +160,7 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
       activeFolders,
       effectiveFiles,
       shadowedFiles,
+      warnings: [...mod.warnings, ...decompileWarnings],
       issues: resolved.issues.filter(issue => issue.packageId === mod.packageId),
     })
   }
