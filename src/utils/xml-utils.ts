@@ -33,8 +33,11 @@ export const parser = new XMLParser({
     if (isAttribute) return false
     if (tag === 'li') return true
 
-    const parts = path.toString().split('.')
-    return parts.length === 2 && parts.at(0) === 'Defs'
+    // Defs first-level child (game: one def per node). Equality, not segment
+    // counting: namespace-qualified def tags contain dots themselves
+    // (e.g. <AlienRace.ThingDef_AlienRace> -> path "Defs.AlienRace.ThingDef_AlienRace"),
+    // and deeper nesting ("Defs.X.Y") never equals "Defs." + tag.
+    return path.toString() === 'Defs.' + tag
   },
 })
 

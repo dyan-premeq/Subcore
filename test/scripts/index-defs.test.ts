@@ -51,6 +51,10 @@ beforeAll(async () => {
         <ThingDef Name="SharedBase" Abstract="True">
           <label>core shared base</label>
         </ThingDef>
+        <AlienRace.ThingDef_AlienRace ParentName="GunBase">
+          <defName>TestAlienRace</defName>
+          <label>namespace def inheriting across tags</label>
+        </AlienRace.ThingDef_AlienRace>
       </Defs>
     `,
   )
@@ -367,6 +371,40 @@ describe('index-defs', () => {
         )
         .all({ $name: 'GhostDef' })
       expect(rows).toHaveLength(0)
+    } finally {
+      db.close()
+    }
+  })
+
+  test('namespace-qualified def tags index with verbatim defType and cross-tag inheritance', () => {
+    const db = new Database(join(tempRoot, 'index.db'), { readonly: true })
+    try {
+      const rows = db
+        .query<
+          { defType: string; rawPayload: string; mergedPayload: string },
+          { $name: string }
+        >('SELECT defType, rawPayload, mergedPayload FROM defs WHERE defName = $name')
+        .all({ $name: 'TestAlienRace' })
+      expect(rows).toHaveLength(1)
+      // defType is the literal XML tag (game: GetTypeInAnyAssembly(node.Name))
+      expect(rows[0]!.defType).toBe('AlienRace.ThingDef_AlienRace')
+
+      // raw payload stays as authored
+      const raw = JSON.parse(rows[0]!.rawPayload)
+      expect(raw.statBases).toBeUndefined()
+
+      // merged: inherits from the ThingDef @Name template across tags
+      // (registry is keyed by @Name only, game XmlInheritance.GetBestParentFor)
+      const merged = JSON.parse(rows[0]!.mergedPayload)
+      expect(merged.statBases.MaxHitPoints).toBe(100)
+      expect(merged.label).toBe('namespace def inheriting across tags')
+      expect(merged['@_ParentName']).toBeUndefined()
+
+      // reachable through the repo API with the namespace defType
+      const details = getDefDetailsRows(db, 'TestAlienRace', 'AlienRace.ThingDef_AlienRace', {
+        view: 'merged',
+      })
+      expect(details).toHaveLength(1)
     } finally {
       db.close()
     }
