@@ -1,6 +1,6 @@
 {
   "name": "rimsage",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "An MCP server that enables searching and browsing of RimWorld source code.",
   "main": "src/stdio.ts",
   "type": "module",
@@ -19,9 +19,10 @@
     "clean": "bun src/scripts/clean-db.ts",
     "index:defs": "bun src/scripts/index-defs.ts",
     "index:csharp": "bun src/scripts/index-csharp.ts",
+    "index:source": "bun src/scripts/index-source.ts",
     "index:patches": "bun src/scripts/index-patches.ts",
     "regression:patches": "bun src/scripts/regression-patches.ts",
-    "build": "bun run clean && bun run index:mods && bun run index:defs && bun run index:patches && bun run index:csharp",
+    "build": "bun run clean && bun run index:mods && bun run index:defs && bun run index:patches && bun run index:csharp && bun run index:source",
     "type-check": "tsc",
     "index:mods": "bun src/scripts/index-mods.ts",
     "import:mods": "bun src/scripts/import-mods.ts"

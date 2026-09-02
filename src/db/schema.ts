@@ -1,4 +1,4 @@
-// Single source of truth for index.db DDL (schema v5).
+// Single source of truth for index.db DDL (schema v6).
 //
 // All CREATE TABLE statements live here — scripts and repositories must not
 // define tables inline. JSON columns are TEXT parsed in the application
@@ -6,7 +6,7 @@
 
 import type { Database } from 'bun:sqlite'
 
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS harmony_patches (
   postfix      INTEGER,
   transpiler   INTEGER,
   finalizer    INTEGER
+);
+
+-- find_refs file-level prefilter: contentless FTS5 over every text file under dist/assets.
+-- Token class (alnum + '_') mirrors rg's \b so a per-token AND is a superset of rg hits.
+CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(
+  body, content='', detail=none, columnsize=0,
+  tokenize="unicode61 tokenchars '_'"
+);
+CREATE TABLE IF NOT EXISTS source_files (
+  id   INTEGER PRIMARY KEY,   -- = source_fts rowid
+  path TEXT UNIQUE NOT NULL   -- posix, relative to dist/assets (same form as csharp_index.filePath)
 );
 `
 

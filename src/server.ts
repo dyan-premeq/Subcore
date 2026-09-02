@@ -380,6 +380,7 @@ function registerTools(server: McpServer) {
       inputSchema: z.strictObject({
         name: z
           .string()
+          .regex(/^[A-Za-z0-9_.]+$/)
           .describe(
             'Exact identifier: a defName, C# type or method name (e.g. `Gun_Revolver`, `StoreUtility`, `Notify_ItemRemoved`).',
           ),

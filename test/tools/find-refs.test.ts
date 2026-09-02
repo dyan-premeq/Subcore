@@ -3,15 +3,18 @@ import { Database } from 'bun:sqlite'
 import { join } from 'node:path'
 import { findRefs } from '../../src/tools/find-refs'
 import { ensureSchema } from '../../src/db/schema'
+import { indexSourceFiles } from '../../src/scripts/index-source'
 import { replaceMods, type ModInsertRow } from '../../src/repositories/mods-repo'
 import { replaceDefs } from '../../src/repositories/defs-repo'
 import { replacePatchOps } from '../../src/repositories/patches-repo'
 import { replaceHarmonyPatches } from '../../src/repositories/harmony-repo'
 import { PathSandbox } from '../../src/utils/path-sandbox'
 
-// source quadrant runs rg over the shared fixture tree; Ref_Thing appears in
-// Defs/ (1), Source/ (1) and Mods/RefTraceMod (15: 4 files + ManyRefs x12).
-// Trace_Util must appear in fixture files nowhere — it is harmony-only.
+// source quadrant is answered from the build-time FTS5 index (indexed in
+// beforeAll over the shared fixture tree) plus a line-by-line exact regex
+// pass; Ref_Thing appears in Defs/ (1), Source/ (1) and Mods/RefTraceMod
+// (15: 4 files + ManyRefs x12). Trace_Util must appear in fixture files
+// nowhere — it is harmony-only.
 const sandbox = new PathSandbox(join(import.meta.dir, '../fixtures/game-root'))
 
 let db: Database
@@ -30,9 +33,10 @@ function mod(packageId: string, modId: number, loadOrder: number, assetPath: str
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   db = new Database(':memory:')
   ensureSchema(db)
+  await indexSourceFiles(db, sandbox.basePath)
 
   replaceMods(db, [
     mod('ludeon.rimworld', 1, 0, ''),

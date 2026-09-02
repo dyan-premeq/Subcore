@@ -1,8 +1,10 @@
+import { file } from 'bun'
 import type { Database } from 'bun:sqlite'
+import { join } from 'node:path'
 import { z } from 'zod'
 import { textResponse } from '../utils/mcp-response'
 import { PathSandbox } from '../utils/path-sandbox'
-import { searchSourceImpl } from './search-source'
+import { findFilesContaining } from '../repositories/source-fts-repo'
 import { getDefDetailsRows } from '../repositories/defs-repo'
 import { searchPatchOps } from '../repositories/patches-repo'
 import { searchHarmonyPatches, type HarmonySearchRow } from '../repositories/harmony-repo'
@@ -64,8 +66,9 @@ export type FindRefsStructured = z.infer<typeof findRefsOutputSchema>
 /**
  * Exhaustive reference lookup for one exact identifier: full-text source
  * matches grouped by layer, plus the three indexed reverse lookups (defs,
- * patch ops, harmony patches). Everything is delegated to existing queries —
- * no new index, no scope-narrowing options (exhaustiveness is the point).
+ * patch ops, harmony patches). The source quadrant is answered from the
+ * build-time FTS5 index (candidate files) refined by an exact line-by-line
+ * regex pass — no scope-narrowing options (exhaustiveness is the point).
  */
 export async function findRefs(
   db: Database,
@@ -75,7 +78,7 @@ export async function findRefs(
   const defs = queryDefs(db, name)
   const patches = queryPatches(db, name)
   const harmony = queryHarmony(db, name)
-  const { groups: sourceGroups, truncated } = await querySource(sandbox, name)
+  const sourceGroups = await querySource(db, sandbox, name)
 
   const structuredContent: FindRefsStructured = {
     defs,
@@ -110,11 +113,6 @@ export async function findRefs(
           `  ... use search_source with scope:'${group.scope}' to see all ${group.total} matches`,
         )
       }
-    }
-    if (truncated) {
-      lines.push(
-        '[TRUNCATED] Full-text output exceeded the 100KB search limit; matches above are partial — drill down with search_source per scope.',
-      )
     }
     sections.push(lines.join('\n'))
   }
@@ -153,25 +151,29 @@ interface SourceGroup {
   hits: SourceHit[]
 }
 
+/**
+ * FTS narrows the corpus to files whose token set covers every token of
+ * `name`; the exact \\b regex then runs line-by-line over just those files.
+ */
 async function querySource(
+  db: Database,
   sandbox: PathSandbox,
   name: string,
-): Promise<{ groups: SourceGroup[]; truncated: boolean }> {
+): Promise<SourceGroup[]> {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const { output, exceededOutputLimit } = await searchSourceImpl(
-    sandbox,
-    `\\b${escaped}\\b`,
-    false,
-    undefined,
-    { scope: 'all' },
-  )
+  const pattern = new RegExp(`\\b${escaped}\\b`, 'i')
 
   const byGroup = new Map<string, SourceHit[]>()
-  for (const hit of parseRgHeadingOutput(output)) {
-    const group = groupKey(hit.file)
-    const list = byGroup.get(group)
-    if (list) list.push(hit)
-    else byGroup.set(group, [hit])
+  for (const relativePath of findFilesContaining(db, name)) {
+    const lines = (await file(join(sandbox.basePath, relativePath)).text()).split(/\r?\n/)
+    lines.forEach((text, index) => {
+      if (!pattern.test(text)) return
+      const hit = { file: relativePath, line: index + 1, text }
+      const group = groupKey(hit.file)
+      const list = byGroup.get(group)
+      if (list) list.push(hit)
+      else byGroup.set(group, [hit])
+    })
   }
 
   const groups = [...byGroup.entries()]
@@ -193,32 +195,7 @@ async function querySource(
       }
     })
 
-  return { groups, truncated: exceededOutputLimit }
-}
-
-/**
- * rg runs with --heading: a file path line starts each block, match lines are
- * `<lineNum>:<content>`, blank lines separate blocks. Paths are normalized to
- * forward slashes without the './' prefix.
- */
-function parseRgHeadingOutput(output: string): SourceHit[] {
-  const hits: SourceHit[] = []
-  let file = ''
-  for (const line of output.split(/\r?\n/)) {
-    if (line === '') continue
-    const match = /^(\d+):(.*)$/.exec(line)
-    if (match && file !== '') {
-      hits.push({ file, line: Number(match[1]), text: match[2] })
-    } else {
-      file = normalizePath(line)
-    }
-  }
-  return hits
-}
-
-function normalizePath(path: string): string {
-  const unified = path.replace(/\\/g, '/')
-  return unified.startsWith('./') ? unified.slice(2) : unified
+  return groups
 }
 
 /** Layer group for a sandbox-relative path: Defs/, Source/, Mods/<pkg>, or itself. */
