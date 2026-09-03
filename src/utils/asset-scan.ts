@@ -108,7 +108,7 @@ export function scanModFiles(
     // effectiveFiles order replicates DirectXmlLoader.XmlAssetsInModFolder:
     // load folders in descending priority, files sorted within each folder
     // (Dictionary.TryAdd — first wins). The game consumes patches in exactly
-    // this order (§4.5), so the array order must be preserved here.
+    // this order, so the array order must be preserved here.
     for (const rel of manifestMod.effectiveFiles) {
       const posix = toPosix(rel)
       if (!kindRe.test(posix)) continue

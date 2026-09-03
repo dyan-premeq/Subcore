@@ -2,7 +2,7 @@ import type { Def, XmlNode, XmlObject } from '../types'
 import { compareStrings } from './compare'
 
 /**
- * One indexed def plus the context Verse.XmlInheritance needs (design doc §4.3).
+ * One indexed def plus the context Verse.XmlInheritance needs.
  */
 export interface DefEntry {
   def: Def
@@ -41,7 +41,7 @@ export interface DefResolution {
 }
 
 /**
- * XML inheritance with the semantics of Verse.XmlInheritance (design doc §4.3):
+ * XML inheritance with the semantics of Verse.XmlInheritance:
  * best parent = same-@Name candidate with the highest loadOrder ≤ the child's,
  * same-mod duplicate names are rejected, missing parents / cycles degrade to
  * raw nodes instead of throwing, child attributes fully replace parent ones.
@@ -55,7 +55,7 @@ export function processDefs(entries: DefEntry[]): DefResolution {
   }
 }
 
-// #region MayRequire (design doc §4.6)
+// #region MayRequire
 
 /**
  * Node-level load condition: MayRequire = every listed packageId must be

@@ -1,6 +1,6 @@
 // Static Harmony-patch extraction from C# source text (mod Source/ and
-// decompiled assemblies). Design doc §6.7: three statically parseable
-// patterns; anything runtime-resolved is recorded as targetType='dynamic'.
+// decompiled assemblies). Three statically parseable patterns; anything
+// runtime-resolved is recorded as targetType='dynamic'.
 //
 //  1. attribute patches: [HarmonyPatch(typeof(T), "M")] above a class
 //     (stacked attributes merge; nameof(...) counts as static),

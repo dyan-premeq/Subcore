@@ -61,8 +61,8 @@ export interface PatchEvaluatorOptions {
 
 /**
  * Load order marker for defs introduced by patches: DefDatabase.AddDef runs
- * patch-added defs after every mod definition, so they override all of them
- * (§4.2). The JSON pipeline sorts groups by loadOrder, last write wins.
+ * patch-added defs after every mod definition, so they override all of them.
+ * The JSON pipeline sorts groups by loadOrder, last write wins.
  */
 export const PATCH_DEF_LOAD_ORDER = 2147483647
 
@@ -70,9 +70,9 @@ const ELEMENT = 1
 const TEXT = 3
 
 /**
- * The PatchOperations interpreter (design doc §6.6 layer ①): the only code
- * holding .NET change semantics. Builds the unified `<Defs>` tree exactly
- * like LoadedModManager.CombineIntoUnifiedXML (same-name defs coexist, no
+ * The PatchOperations interpreter: the only code holding .NET change
+ * semantics. Builds the unified `<Defs>` tree exactly like
+ * LoadedModManager.CombineIntoUnifiedXML (same-name defs coexist, no
  * merging), applies every patch in game order, then serializes each def back
  * to XML text at the pipeline boundary.
  *
@@ -654,7 +654,7 @@ export class PatchEvaluator {
 
   /**
    * Nodes a patch placed directly under the unified <Defs> are patch-added
-   * defs: they get the patch's origin and override everything (§4.2).
+   * defs: they get the patch's origin and override everything.
    */
   private claimPatchAddedDefs(imported: Node[], record: PatchOpRecord): void {
     for (const node of imported) {
@@ -767,7 +767,7 @@ export class PatchEvaluator {
 
   /**
    * A patch on an abstract template flows into every inheriting def (patch
-   * runs BEFORE inheritance resolution, §4.1): propagate changers down the
+   * runs BEFORE inheritance resolution): propagate changers down the
    * @ParentName edges until a fixpoint, respecting GetBestParentFor's
    * loadOrder <= child constraint.
    */

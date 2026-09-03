@@ -1,5 +1,5 @@
-// Optional decompilation of a mod's effective Assemblies into its dist copy
-// (design doc §6.7). Uses the local ilspycmd with its default output — one
+// Optional decompilation of a mod's effective Assemblies into its dist copy.
+// Uses the local ilspycmd with its default output — one
 // <AssemblyName>.decompiled.cs per assembly. 0Harmony.dll is skipped: it is
 // the Harmony library itself, already indexed as its own mod, and decompiling
 // every bundled copy would duplicate megabytes of identical source.
@@ -11,7 +11,7 @@ import { basename, join } from 'node:path'
 export interface DecompileStats {
   decompiled: number
   skipped: number
-  /** Basenames of dlls ilspycmd failed on; drives mod.warnings (design doc §3 R2). */
+  /** Basenames of dlls ilspycmd failed on; drives mod.warnings. */
   failed: string[]
 }
 
@@ -23,7 +23,7 @@ const IL_COMMENT_LINE = /^\s*\/\/IL_[0-9A-Fa-f]+:/
  * Rewrites `path` without ilspycmd's `//IL_xxxx: Unknown result type...` noise
  * lines (2354 in one observed file). Must happen at build time, before the
  * csharp index bakes `startLine`, so served line numbers stay in sync with the
- * file (design doc §3 F5).
+ * file.
  */
 function stripIlComments(path: string): void {
   const lines = readFileSync(path, 'utf8').split('\n')

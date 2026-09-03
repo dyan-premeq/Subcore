@@ -18,7 +18,7 @@ export interface ResolveProfileOrderOptions {
 }
 
 /**
- * Resolves the dev-time load order for a profile (design doc §6.2):
+ * Resolves the dev-time load order for a profile:
  * - Core anchored at 0, official DLCs follow in ProductPackageIDs order;
  * - community mods topologically sorted by modDependencies/loadAfter/loadBefore
  *   (Kahn's algorithm with lexicographic tie-break -> deterministic);

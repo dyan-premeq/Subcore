@@ -105,7 +105,7 @@ export async function readCsharpSymbol(
   }
 
   // multiple definitions (vanilla + mods, or several mods): list the
-  // sources so the caller can re-invoke with file_path (design doc §6.7)
+  // sources so the caller can re-invoke with file_path
   if (rows.length > 1) {
     return textResponse(
       `Type '${typeName}' is defined in ${rows.length} files. ` +

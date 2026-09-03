@@ -58,7 +58,7 @@ export async function rebuildPatchesIndex(
       )
     }
 
-    // every "is it active" judgment runs against the dev profile (§6.2)
+    // every "is it active" judgment runs against the dev profile
     const activePackageIds = new Set(listInProfilePackageIds(db))
     const activeModNames = new Set(listInProfileModNames(db))
     const manifest = readManifest(manifestPath)

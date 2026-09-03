@@ -51,7 +51,7 @@ export async function rebuildDefsIndex(
     }
 
     // 2. collect def file refs
-    // MayRequire is evaluated against the dev profile (design doc §6.2):
+    // MayRequire is evaluated against the dev profile:
     // the profile is the single source of truth for what is "active"
     const activePackageIds = new Set(listInProfilePackageIds(db))
     const manifest = readManifest(manifestPath)
@@ -96,7 +96,7 @@ export async function rebuildDefsIndex(
       )
     }
 
-    // 4. resolve inheritance (game XmlInheritance semantics, §4.3). The sort
+    // 4. resolve inheritance (game XmlInheritance semantics). The sort
     // keeps same-mod def dedupe deterministic ("first file wins"); the
     // resolver itself works from explicit load orders, not input order.
     console.log(`Resolving inheritance for ${flat.length} defs...`)
@@ -125,7 +125,7 @@ export async function rebuildDefsIndex(
 
     const rows: DefInsertRow[] = []
     // same-mod duplicate (defName, defType): the game logs an error and keeps
-    // the first (DefDatabase.AddAllInMods, §4.2) — flat is (loadOrder, filePath)
+    // the first (DefDatabase.AddAllInMods) — flat is (loadOrder, filePath)
     // sorted, so "first" = alphabetically first file, deterministic
     const seenDefKeys = new Set<string>()
     flat.forEach((entry, index) => {

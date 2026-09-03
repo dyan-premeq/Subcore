@@ -247,7 +247,7 @@ export function copyModTree(
       } else if (isVersionDir) {
         walk(src, dest, 'root')
       } else {
-        // heavy assets or unknown dirs are not copied (design doc §5.2)
+        // heavy assets or unknown dirs are not copied
         skipped += countFiles(src)
       }
     }

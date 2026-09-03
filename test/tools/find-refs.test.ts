@@ -196,7 +196,7 @@ describe('find_refs', () => {
 
     expect(hit).toEqual({
       file: 'Mods/RefTraceMod/Defs/TraceRef.xml',
-      line: 26,
+      line: 25,
       text: '        <afterSelfClosing>After_Ref</afterSelfClosing>',
       path: 'Defs/AlienRace.RaceSettings/pawnKindSettings/alienrefugeekinds/afterSelfClosing',
     })

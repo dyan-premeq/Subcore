@@ -60,7 +60,7 @@ beforeAll(async () => {
     `,
   )
   // vanilla patch patches an abstract def: the child's patched view must
-  // inherit the patched content (inheritance runs AFTER patches, §4.1)
+  // inherit the patched content (inheritance runs AFTER patches)
   await write(
     join(patchesDir, 'CorePatch.xml'),
     `

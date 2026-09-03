@@ -36,7 +36,7 @@ for await (const relativePath of glob.scan({ cwd: root, onlyFiles: true })) {
 }
 
 // official DLC ship PatchOperations too (Biotech/Ideology/Odyssey/Royalty);
-// they run against the unified XML exactly like mod patches (§4.5)
+// they run against the unified XML exactly like mod patches
 const patchGlob = new Glob('Data/*/Patches/**/*.xml')
 
 for await (const relativePath of patchGlob.scan({ cwd: root, onlyFiles: true })) {

@@ -1,15 +1,15 @@
 {
-  "name": "rimsage",
+  "name": "modded-rimsage",
   "version": "1.2.2",
-  "description": "An MCP server that enables searching and browsing of RimWorld source code.",
+  "description": "An MCP server for RimWorld mod development: static reconstruction of the modded def pipeline, C#/Harmony indexing and cross-layer reference lookup.",
   "main": "src/stdio.ts",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/realloon/RimSage.git"
+    "url": "git+https://github.com/dyan-premeq/Modded-RimSage.git"
   },
-  "homepage": "https://rimsage.com",
+  "homepage": "https://github.com/dyan-premeq/Modded-RimSage",
   "files": [
     "src"
   ],

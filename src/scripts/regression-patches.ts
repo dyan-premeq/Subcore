@@ -1,4 +1,4 @@
-// Real-corpus patch regression (design doc §7, M3 acceptance).
+// Real-corpus patch regression.
 //
 // Two modes:
 //
@@ -9,7 +9,7 @@
 //   bun run regression:patches --workshop
 //     Statically scans EVERY patch XML on this machine (game Data/*/Patches +
 //     Workshop + local Mods) without importing or evaluating — a full-corpus
-//     unsupported-custom audit for the §9 M3 acceptance criterion (<2%).
+//     unsupported-custom audit against the <2% acceptance threshold.
 //
 // Not part of CI or `bun test` — run manually.
 
@@ -71,7 +71,7 @@ async function reportWorkshopCorpus(): Promise<void> {
   const rate = (unsupported / total) * 100
   // framework-specific custom classes (e.g. Combat Extended's
   // MakeGunCECompatible, spread across hundreds of CE-compat patch files)
-  // are §10's known deviation, not an interpreter gap — the per-class view
+  // are a known deviation, not an interpreter gap — the per-class view
   // separates them from genuinely unsupported standard operations
   const byClass = new Map<string, number>()
   for (const record of evaluator.opRecords) {
@@ -91,7 +91,7 @@ async function reportWorkshopCorpus(): Promise<void> {
   const restRate = (rest / total) * 100
   console.log(
     `\nexcluding the single largest custom class: ${rest} ops (${restRate.toFixed(2)}%) — ` +
-      `${restRate < 2 ? 'PASS' : 'FAIL'} (<2%, §9 M3; that class is a mod framework's own PatchOperation, §10 known deviation)`,
+      `${restRate < 2 ? 'PASS' : 'FAIL'} (<2%; that class is a mod framework's own PatchOperation, a known deviation)`,
   )
 }
 
@@ -120,7 +120,7 @@ function reportIndexedCorpus(): void {
     const unsupported = byStatus.find(row => row.status === 'unsupported-custom')?.n ?? 0
     const rate = (unsupported / total) * 100
     console.log(
-      `\nunsupported-custom rate: ${rate.toFixed(2)}% — ${rate < 2 ? 'PASS' : 'FAIL'} (<2%, design doc §9 M3)`,
+      `\nunsupported-custom rate: ${rate.toFixed(2)}% — ${rate < 2 ? 'PASS' : 'FAIL'} (<2%)`,
     )
 
     const errors = byStatus.find(row => row.status === 'error')?.n ?? 0

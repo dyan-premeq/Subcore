@@ -12,7 +12,7 @@ const typeRegex =
 
 // scan roots: the vanilla decompile plus every imported mod's root Source/
 // and decompiled assemblies. Old version folders stay unindexed (reference
-// corpus only, design doc §5.2).
+// corpus only).
 const SCAN_PATTERNS = [
   'Source/**/*.cs',
   'Mods/*/Source/**/*.cs',
