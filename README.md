@@ -2,131 +2,169 @@
 
 [![MCP Server](https://badge.mcpx.dev?type=server)](https://modelcontextprotocol.io/introduction) [![bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun)](https://bun.com/) [![ripgrep](https://img.shields.io/badge/ripgrep-%23000000.svg?style=flat&logo=rust)](https://github.com/BurntSushi/ripgrep)
 
-An MCP server that provides RimWorld source code search and browsing capabilities.
+RimSage is a Model Context Protocol (MCP) server for RimWorld mod development and codebase analysis.
 
-## Available Tools
+> **Note**: This project is an enhanced fork of [realloon/RimSage](https://github.com/realloon/RimSage), overhauled specifically for **modded environments**. While upstream focuses on vanilla source and Def browsing, this fork statically reconstructs RimWorld's mod loading pipeline—evaluating XML `PatchOperation` rules in load order, resolving cross-mod `XmlInheritance`, indexing decompiled C# assemblies and Harmony patches, and providing exhaustive cross-layer reference lookups for AI agents.
 
-The server provides these tools:
+---
 
-- `search_source` - Search RimWorld source code
-- `read_file` - Read specific files
-- `list_directory` - List directory contents
-- `search_defs` - Search through RimWorld Defs
-- `get_def_details` - Get raw or merged RimWorld Def XML
-- `read_csharp_symbol` - Read a C# type or method definition
+## MCP Tools
 
-## Quick Start
+RimSage provides 10 tools tailored for AI agent workflows:
 
-The easiest way to use RimSage is through the online service:
+### Cross-Layer Reference Tracing
+- **`find_refs`** — Exhaustive reference lookup across all layers simultaneously: vanilla Defs, C# source, mod XML, decompiled mod assemblies, XML patches, and Harmony hooks. Takes a single identifier (`defName`, C# type, or method).
 
-```
-https://mcp.rimsage.com/mcp
-```
+### Def Inspection & Discovery
+- **`get_def_details`** — Inspect full XML for a specific `defName` along with its override lineage.
+  - `view="patched"`: Game runtime truth after XML patches and inheritance resolution.
+  - `view="merged"`: Inheritance-resolved XML without patches.
+  - `view="raw"`: Authored XML as written in source.
+- **`search_defs`** — Fast indexed search by partial `defName` or in-game label. Supports `defType` and `mod` filters.
 
-You can find the integration methods for different Agent clients in the [wiki](https://github.com/realloon/RimSage/wiki).
+### Patch & Hook Reverse-Lookup
+- **`search_patches`** — Reverse lookup of XML `PatchOperation` rules by target `defName`, patching mod (`packageId`), or operation class (e.g. `PatchOperationReplace`).
+- **`search_harmony`** — Reverse lookup of Harmony patches by target C# class (`targetType`) or method (`targetMethod`). Static analysis of mod C# and assemblies.
 
-## Self-Hosted
+### C# Source Navigation
+- **`read_csharp_symbol`** — Read the source code of a C# class, method, or field by name without needing its file path. Resolves across vanilla code and decompiled mod assemblies.
+- **`search_source`** — Regex search with FTS identifier pre-filtering across all source files and Defs. Supports scope (`all`, `vanilla`, `mods`, or a specific `packageId`) and `loaded_only` filters.
 
-RimSage also supports stdio transport for local deployment.
+### Workspace & Profile
+- **`list_mods`** — Overview of active mods in the profile, load order, asset counts, and dependency/compatibility warnings.
+- **`read_file`** — Read a specific file by relative path with optional line offsets.
+- **`list_directory`** — Browse directory contents within the asset sandbox.
 
-1. Install dependencies
+---
 
-- [bun](https://bun.com/)
+## Setup & Usage
+
+### 1. Prerequisites
+
+- [Bun](https://bun.com/) (v1.0+)
 - [ripgrep](https://github.com/BurntSushi/ripgrep)
+- *(Optional, for mod assembly decompilation)* [ilspycmd](https://github.com/icsharpcode/ILSpy):
+  ```sh
+  dotnet tool install -g ilspycmd
+  ```
 
-2. Clone the repository
-
-```sh
-git clone https://github.com/realloon/RimSage.git
-```
-
-3. Install package dependencies
+### 2. Clone & Install
 
 ```sh
+git clone https://github.com/dyan-premeq/Modded-RimSage.git
+cd Modded-RimSage
 bun install
 ```
 
-4. Build index
+### 3. Import Vanilla Assets
+
+Extract Defs and C# source from your local game installation and decompiled source:
 
 ```sh
-bun run src/scripts/import-defs /path/to/your/rimworld/root/path
-bun run src/scripts/import-csharp /path/to/decompiled/source/root/path
+bun run src/scripts/import-defs.ts /path/to/RimWorld
+bun run src/scripts/import-csharp.ts /path/to/DecompiledSource
+```
+
+*(Decompiling RimWorld for mod development is permitted under the [RimWorld EULA](https://rimworldgame.com/eula).)*
+
+### 4. (Optional) Configure & Import Mods
+
+RimSage uses a decoupled **profile** (`rimsage.profile.json`) to define which mods to index, independent of your player save state.
+
+Generate a profile from your game's active mod list:
+```sh
+bun run import:mods /path/to/RimWorld --from-game-config --out rimsage.profile.json
+```
+
+Or write `rimsage.profile.json` manually:
+```jsonc
+{
+  "name": "my-mod-project",
+  "base": "all-dlc", // "core-only" | "all-dlc"
+  "mods": [
+    "brrainz.harmony",
+    "oskarpotocki.vanillafactionsexpanded.core",
+    "mehni.pickupandhaul"
+  ],
+  "autoOrder": true // Topological sort by dependencies
+}
+```
+
+Import mod assets and decompile their assemblies:
+```sh
+bun run import:mods /path/to/RimWorld
+```
+
+### 5. Build Database Index
+
+Build the SQLite index and patch cache:
+```sh
 bun run build
 ```
 
-You'll need local RimWorld files and a decompiled C# project, which is allowed under the [RimWorld EULA](https://rimworldgame.com/eula).
+### 6. Connect to Agent Clients
 
-5. Add this MCP server
+#### Stdio Transport (Cursor, Claude Desktop, Antigravity, etc.)
 
-You can find the integration methods for different Agent clients in the [wiki](https://github.com/realloon/RimSage/wiki).
-
-Most Agent clients support `mcp.json` configuration:
+Add to your client's MCP settings (e.g. `.cursor/mcp.json` or `claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "rimsage": {
       "command": "bun",
-      "args": ["run", "/path/to/this/repo"]
+      "args": ["run", "/path/to/RimSage/src/stdio.ts"]
     }
   }
 }
 ```
 
-**Replace** `/path/to/this/repo` with the actual path to this repository on your system.
+#### Streamable HTTP Transport
 
-## Modded Environment Development
-
-RimSage can index mods on top of the vanilla game. 
-
-The dev-time mod set is declared in a **profile** (`rimsage.profile.json`), which is independent from the player's load order.
-
-1. Snapshot (or hand-write) a profile
+Alternatively, start the local HTTP server:
 
 ```sh
-# draft from the player's ModsConfig.xml (then trim it)
-bun run import:mods /path/to/game --from-game-config --out rimsage.profile.json
+bun run start:http
+# Listening on http://localhost:3000/mcp
 ```
 
-```jsonc
-// rimsage.profile.json
+And configure your client with the local URL:
+
+```json
 {
-  "name": "my-compat-project",
-  "base": "all-dlc",           // 'core-only' | 'all-dlc'
-  "mods": [
-    "brrainz.harmony",
-    "oskarpotocki.vanillafactionsexpanded.core",
-    "mehni.pickupandhaul"
-  ],
-  "autoOrder": true            // topological sort by dependencies; false = keep array order
+  "mcpServers": {
+    "rimsage": {
+      "url": "http://localhost:3000/mcp"
+    }
+  }
 }
 ```
 
-2. Import mods into `dist/assets/Mods` (full structure, incl. version folders; `Textures`/`Sounds` are skipped).  Also produces `dist/mods-manifest.json` with load order + effective file sets.
+---
+
+## How It Works
+
+1. **Load-Order Accurate**: Mods and DLCs are topologically sorted according to `About.xml` dependencies and RimWorld's load rules.
+2. **Patch Before Inheritance**: Faithful to RimWorld's `LoadedModManager`, XML `PatchOperation` modifications run against the raw unified Def tree before `XmlInheritance` resolves templates and abstract parents.
+3. **Lineage Tracking**: Every Def retains provenance (`defined by ... -> overridden by ... -> effective: ...`), showing exact override origins.
+4. **Zero Hallucination Routing**: Built-in instructions guide AI models to check indexed ground truth (`find_refs`, `get_def_details`, `search_harmony`) rather than guessing class structures or brute-force searching text.
+
+---
+
+## Development & Tests
 
 ```sh
-bun run import:mods /path/to/game            # RIMSAGE_GAME_ROOT also works
-bun run import:mods /path/to/game --full     # force re-copy
+# Run unit test suite
+bun test
+
+# Validate patch evaluation against index
+bun run regression:patches
+
+# Scan all patch XML files in workshop folder
+bun run regression:patches --workshop
 ```
 
-3. Build and use
+## License
 
-```sh
-bun run build
-```
+MIT
 
-New/changed tools: `list_mods`, `search_source` with `scope` ('vanilla' | 'mods' | 'all' | packageId) and `loaded_only`, `search_defs` with `mod` filter and `dup` ('effective' = load-order winner only, default; 'all' = every mod version), `get_def_details` with `view` ('merged' | 'raw' | 'patched'), `dup` and `mod` params plus a **Lineage** header (`defined by … → overridden by … → effective: …`) on every result, and `search_patches` — the reverse lookup over evaluated XML patch operations (`defName` / `packageId` / `opClass`), the entry point for writing compatibility patches.
-
-The **patched view** replays every PatchOperation in game order (fontoxpath over a unified `Defs` tree, then inheritance re-resolution — patches run *before* inheritance, exactly like `LoadedModManager`), so `get_def_details(view='patched')` shows what the game actually loads, with a `Patched by:` provenance line. Abstract templates hit by patches are backfilled into `targetDefs` by `@Name`; changes flow into inheriting defs via the patched tree.
-
-Def semantics follow the game's `XmlInheritance` for the current game version: parent selection by load order, missing parents / cycles degrade instead of failing the build, `MayRequire` / `MayRequireAnyOf` defs are skipped unless the referenced packageId is in the profile (case-insensitive, `|postfix` ignored). The `@Name` inheritance registry is queryable in `dist/index.db` (`def_names` table, one row per `@Name` registration per mod).
-
-## Development
-
-```sh
-bun run start # stdio
-bun run start:http # Streamable HTTP
-bun test       # unit tests (fixtures under test/fixtures)
-bun run regression:patches            # patch evaluation report over the index
-bun run regression:patches --workshop # static scan of every patch XML on disk (RIMSAGE_GAME_ROOT / RIMSAGE_WORKSHOP_ROOT)
-```
