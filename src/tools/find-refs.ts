@@ -55,7 +55,13 @@ export const findRefsOutputSchema = z.object({
       scope: z.string(),
       total: z.number(),
       hits: z.array(
-        z.object({ file: z.string(), line: z.number(), text: z.string() }),
+        z.object({
+          file: z.string(),
+          line: z.number(),
+          text: z.string(),
+          /** Full XML element path (root included); absent for non-XML hits. */
+          path: z.string().optional(),
+        }),
       ),
     }),
   ),
@@ -69,6 +75,9 @@ export type FindRefsStructured = z.infer<typeof findRefsOutputSchema>
  * patch ops, harmony patches). The source quadrant is answered from the
  * build-time FTS5 index (candidate files) refined by an exact line-by-line
  * regex pass — no scope-narrowing options (exhaustiveness is the point).
+ * XML matches carry their full element path (a bare <li> hit says nothing
+ * about which config block it belongs to), and identifiers inside XML
+ * comments are not references, so they are masked out before matching.
  */
 export async function findRefs(
   db: Database,
@@ -106,7 +115,11 @@ export async function findRefs(
     for (const group of sourceGroups) {
       lines.push(`[${group.group}] ${group.total} ${group.total === 1 ? 'match' : 'matches'}`)
       for (const hit of group.hits) {
-        lines.push(`  ${hit.file}:${hit.line}: ${hit.text}`)
+        lines.push(
+          hit.path
+            ? `  ${hit.file}:${hit.line} [${hit.path}]: ${hit.text}`
+            : `  ${hit.file}:${hit.line}: ${hit.text}`,
+        )
       }
       if (group.total > group.hits.length) {
         lines.push(
@@ -141,6 +154,8 @@ interface SourceHit {
   file: string
   line: number
   text: string
+  /** Full XML element path for .xml hits (see XmlPathTracker); else absent. */
+  path?: string
 }
 
 /** Internal shape; structuredContent drops `group` (the header label). */
@@ -166,9 +181,14 @@ async function querySource(
   const byGroup = new Map<string, SourceHit[]>()
   for (const relativePath of findFilesContaining(db, name)) {
     const lines = (await file(join(sandbox.basePath, relativePath)).text()).split(/\r?\n/)
+    const tracker = relativePath.endsWith('.xml') ? new XmlPathTracker() : null
     lines.forEach((text, index) => {
-      if (!pattern.test(text)) return
-      const hit = { file: relativePath, line: index + 1, text }
+      const masked = tracker?.mask(text) ?? text
+      const match = pattern.exec(masked)
+      const path = tracker ? tracker.walk(masked, match?.index ?? -1) : undefined
+      if (!match) return
+      const hit: SourceHit = { file: relativePath, line: index + 1, text }
+      if (path) hit.path = path
       const group = groupKey(hit.file)
       const list = byGroup.get(group)
       if (list) list.push(hit)
@@ -196,6 +216,63 @@ async function querySource(
     })
 
   return groups
+}
+
+/** Opening/closing tag: group 1 = closing slash, 2 = name, 3 = self-close slash. */
+const TAG_RE = /<(\/?)([A-Za-z_][\w.:-]*)(?:"[^"]*"|'[^']*'|[^>"'])*?(\/?)>/g
+
+/**
+ * Line-ordered XML context tracker for one file: masks comments
+ * (space-preserving so indices stay valid, with cross-line state) and
+ * maintains the open-element stack so any character offset maps to its full
+ * element path. mask() and walk() must each be called once per line, in file
+ * order.
+ */
+class XmlPathTracker {
+  private inComment = false
+  private readonly stack: string[] = []
+
+  mask(line: string): string {
+    let out = line
+    if (this.inComment) {
+      const end = out.indexOf('-->')
+      if (end === -1) return ' '.repeat(out.length)
+      this.inComment = false
+      out = ' '.repeat(end + 3) + out.slice(end + 3)
+    }
+    for (let start = out.indexOf('<!--'); start !== -1; start = out.indexOf('<!--', start)) {
+      const end = out.indexOf('-->', start + 4)
+      if (end === -1) {
+        this.inComment = true
+        return out.slice(0, start) + ' '.repeat(out.length - start)
+      }
+      out = out.slice(0, start) + ' '.repeat(end + 3 - start) + out.slice(end + 3)
+    }
+    return out
+  }
+
+  /**
+   * Advance the element stack over one masked line and return the element
+   * path enclosing offset `matchIndex` (root included, e.g.
+   * "Defs/ThingDef/alienrefugeekinds/li/kindDefs/li"). `matchIndex < 0` (no
+   * match) still advances the stack but returns undefined — as does a match
+   * sitting outside any open element.
+   */
+  walk(line: string, matchIndex: number): string | undefined {
+    let snapshot: string | undefined
+    let pending = matchIndex >= 0
+    for (const tag of line.matchAll(TAG_RE)) {
+      if (pending && tag.index! > matchIndex) {
+        snapshot = this.stack.join('/')
+        pending = false
+      }
+      const [, close, name, selfClose] = tag
+      if (close) this.stack.pop()
+      else if (!selfClose) this.stack.push(name)
+    }
+    if (pending) snapshot = this.stack.join('/')
+    return snapshot || undefined
+  }
 }
 
 /** Layer group for a sandbox-relative path: Defs/, Source/, Mods/<pkg>, or itself. */

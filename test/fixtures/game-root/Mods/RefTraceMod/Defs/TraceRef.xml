@@ -4,4 +4,26 @@
     <defName>Ref_Thing</defName>
     <label>mod-side redefinition</label>
   </ThingDef>
+  <AlienRace.RaceSettings>
+    <defName>Ref_RaceSettings</defName>
+    <pawnKindSettings>
+      <alienrefugeekinds>
+        <!--
+          <li>
+            <kindDefs>
+              <li>Ghost_Ref</li>
+            </kindDefs>
+          </li>
+        -->
+        <li>
+          <kindDefs>
+            <li>Deep_Ref</li>
+          </kindDefs>
+          <chance>10.0</chance>
+        </li>
+        <li />
+        <afterSelfClosing>After_Ref</afterSelfClosing>
+      </alienrefugeekinds>
+    </pawnKindSettings>
+  </AlienRace.RaceSettings>
 </Defs>

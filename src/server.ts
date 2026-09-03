@@ -53,9 +53,12 @@ function registerTools(server: McpServer) {
     'search_source',
     {
       title: 'Search RimWorld source',
-      description: 'Search RimWorld source code using regex.',
+      description:
+        'LAST RESORT full-text regex grep over every XML and C# file. Slow, and it cannot tell a definition from a mention. Prefer find_refs (who references X), search_defs (locate a def), search_harmony (who patches a C# method), search_patches (who patched a def), get_def_details (read one def). Use this only when none of those can express the query.',
       inputSchema: z.strictObject({
-        query: z.string().describe('Regex pattern.'),
+        query: z.string().describe(
+          "Regex pattern. A plain identifier (letters/digits/_ only) is matched as a substring via the source index and is fast in any scope; real regex falls back to a full rg scan (slow on scope 'all').",
+        ),
         file_pattern: z
           .string()
           .optional()
@@ -87,7 +90,7 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ query, file_pattern, case_sensitive, scope, loaded_only, limit }) =>
-      searchSource(sandbox, query, case_sensitive, file_pattern, {
+      searchSource(db, sandbox, query, case_sensitive, file_pattern, {
         scope,
         loadedOnly: loaded_only,
         limit,
@@ -99,7 +102,8 @@ function registerTools(server: McpServer) {
     'read_file',
     {
       title: 'Read source file',
-      description: 'Read source file.',
+      description:
+        'Read one exact file by path, optionally a line range. You need the path already; use search_defs / find_refs / search_source to find it first.',
       inputSchema: z.strictObject({
         path: z
           .string()
@@ -132,7 +136,8 @@ function registerTools(server: McpServer) {
     'list_directory',
     {
       title: 'List directory',
-      description: 'List contents of a directory.',
+      description:
+        'Browse one directory to see what files a mod or namespace ships. To locate content by name, use search_defs or find_refs instead.',
       inputSchema: z.strictObject({
         path: z
           .string()
@@ -157,7 +162,8 @@ function registerTools(server: McpServer) {
     'get_def_details',
     {
       title: 'Get Def details',
-      description: 'Get XML of a Def, with its mod override lineage.',
+      description:
+        '"What is inside this def, and which mod overrode it?" Full XML for one exact defName plus its override lineage. Requires the exact defName; use search_defs if you only have a partial name or a label.',
       inputSchema: z.strictObject({
         defName: z.string().describe('Exact defName (e.g. `Gun_Revolver`).'),
         defType: z
@@ -195,7 +201,8 @@ function registerTools(server: McpServer) {
     'search_defs',
     {
       title: 'Search Defs',
-      description: 'Search Def indices by partial name or label.',
+      description:
+        '"Is there a def named or labelled X?" Fast indexed lookup by partial defName or in-game label. Use when you lack the exact defName; switch to get_def_details once you have it.',
       inputSchema: z.strictObject({
         query: z.string().describe('Case-insensitive keyword.'),
         defType: z
@@ -232,12 +239,13 @@ function registerTools(server: McpServer) {
     'read_csharp_symbol',
     {
       title: 'Read C# symbol',
-      description: 'Read a C# type or method definition.',
+      description:
+        'Read the source of a known C# type or method by name, without knowing its file path. Resolves across vanilla source and decompiled mod assemblies.',
       inputSchema: z.strictObject({
         symbol: z
           .string()
           .describe(
-            "Type name, bare or namespace-qualified (e.g. 'FoodUtility', 'Kiiro_Event.KiiroEventSettings'). Use memberName to pick one member.",
+            "Type name: bare ('FoodUtility'), namespace-qualified ('RimWorld.FoodUtility'), or Type.Member ('QuestUtility.IsQuestLodger' reads just that member).",
           ),
         memberName: z
           .string()
@@ -264,7 +272,7 @@ function registerTools(server: McpServer) {
     {
       title: 'List indexed mods',
       description:
-        'List the mods in the current dev profile. Default = one-line overview per mod; pass detail:true (+page) for folders, assets and full warnings.',
+        '"What mods are in this profile, and are any of them broken?" One-line overview per mod by default; detail:true (+page) adds folders, assets and full warnings. Dependency problems (missing, incompatible, cycles, version mismatch) are already reported here.',
       inputSchema: z.strictObject({
         detail: z
           .boolean()
@@ -297,7 +305,7 @@ function registerTools(server: McpServer) {
     {
       title: 'Search XML patches',
       description:
-        'Reverse-lookup XML patch operations: which mod, file and operation patched a def, mod, or op class. The entry point for writing compatibility patches.',
+        '"Which mod changed this def, and how?" Reverse-lookup of XML PatchOperations by target defName, patching mod, or operation class. The entry point for writing compatibility patches.',
       inputSchema: z.strictObject({
         defName: z
           .string()
@@ -336,7 +344,7 @@ function registerTools(server: McpServer) {
     {
       title: 'Search Harmony patches',
       description:
-        'Reverse-lookup Harmony patches: which mod and patch class patches a vanilla type or method. Static parse of mod C# sources and decompiled assemblies; runtime-resolved targets appear as dynamic — read the mod source for those.',
+        '"Which mod hooks, patches or overrides this vanilla C# method?" Reverse-lookup of Harmony patches by target type or method. Never hand-grep for HarmonyPatch attributes, use this. Static parse of mod C# and decompiled assemblies; runtime-resolved targets are marked dynamic and need the mod source read.',
       inputSchema: z.strictObject({
         targetType: z
           .string()
@@ -376,7 +384,7 @@ function registerTools(server: McpServer) {
     {
       title: 'Find all references',
       description:
-        'Exhaustively find every reference to an exact identifier (defName, C# type, or method) across ALL layers: vanilla Defs/Source, mod XML & decompiled C#, XML patches, Harmony patches. Use this FIRST when tracing who uses/spawns/consumes something.',
+        'START HERE to trace who uses, spawns, consumes or references something. Exhaustive across ALL layers at once: vanilla Defs and Source, mod XML and decompiled C#, XML patches, Harmony patches. Takes one exact identifier: a defName, C# type, or method name.',
       inputSchema: z.strictObject({
         name: z
           .string()

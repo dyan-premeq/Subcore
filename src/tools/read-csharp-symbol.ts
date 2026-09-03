@@ -62,14 +62,24 @@ export async function readCsharpSymbol(
   memberName?: string,
   filePath?: string,
 ) {
-  // csharp_index stores bare type names only — accept namespace-qualified input
-  symbol = symbol.split('.').pop()!
-  const allRows = findCsharpTypes(db, symbol)
+  // csharp_index stores bare type names. Accept Namespace.Type (tail is a type)
+  // and Type.Member (tail is not a type, the segment before it is).
+  const segments = symbol.split('.')
+  let typeName = segments.at(-1)!
+  let allRows = findCsharpTypes(db, typeName)
+  if (allRows.length === 0 && segments.length >= 2 && memberName === undefined) {
+    const rows = findCsharpTypes(db, segments.at(-2)!)
+    if (rows.length > 0) {
+      typeName = segments.at(-2)!
+      memberName = segments.at(-1)!
+      allRows = rows
+    }
+  }
 
   if (allRows.length === 0) {
     const symbolLabel = memberName
-      ? `Member '${memberName}' in type '${symbol}'`
-      : `Type '${symbol}'`
+      ? `Member '${memberName}' in type '${typeName}'`
+      : `Type '${typeName}'`
 
     return {
       ...textResponse(
@@ -89,7 +99,7 @@ export async function readCsharpSymbol(
   // candidates instead of pretending the type does not exist
   if (rows.length === 0) {
     return textResponse(
-      `Type '${symbol}' exists but file_path '${normalizedPath}' matched none of its ${allRows.length} definitions:\n` +
+      `Type '${typeName}' exists but file_path '${normalizedPath}' matched none of its ${allRows.length} definitions:\n` +
         formatDefinitionList(allRows),
     )
   }
@@ -98,7 +108,7 @@ export async function readCsharpSymbol(
   // sources so the caller can re-invoke with file_path (design doc §6.7)
   if (rows.length > 1) {
     return textResponse(
-      `Type '${symbol}' is defined in ${rows.length} files. ` +
+      `Type '${typeName}' is defined in ${rows.length} files. ` +
         `Call read_csharp_symbol again with file_path to pick one:\n` +
         formatDefinitionList(rows),
     )
@@ -110,7 +120,7 @@ export async function readCsharpSymbol(
     // the type exists but the requested member does not
     return {
       ...textResponse(
-        `Member '${memberName}' in type '${symbol}' not found in index. Please check the name.`,
+        `Member '${memberName}' in type '${typeName}' not found in index. Please check the name.`,
       ),
     }
   }

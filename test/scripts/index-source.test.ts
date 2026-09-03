@@ -5,7 +5,11 @@ import { mkdir, mkdtemp } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { indexSourceFiles, rebuildSourceIndex } from '../../src/scripts/index-source'
-import { findFilesContaining } from '../../src/repositories/source-fts-repo'
+import {
+  findFilesContaining,
+  findFilesContainingFragment,
+  MAX_EXPANDED_TERMS,
+} from '../../src/repositories/source-fts-repo'
 import { ensureSchema } from '../../src/db/schema'
 import { rmTemp } from '../helpers/fs'
 
@@ -102,5 +106,32 @@ describe('index-source script', () => {
     } finally {
       db.close()
     }
+  })
+
+  test('findFilesContainingFragment expands substring fragments over the vocab', async () => {
+    const tempRoot = await makeTempDir()
+    const assetsRoot = join(tempRoot, 'assets')
+    await mkdir(join(assetsRoot, 'Defs'), { recursive: true })
+    await write(join(assetsRoot, 'Defs/race.xml'), '<alienrefugeekinds>2</alienrefugeekinds>\n')
+    await write(join(assetsRoot, 'Defs/other.xml'), '<storyteller>custom</storyteller>\n')
+
+    const db = new Database(join(tempRoot, 'index.db'))
+    try {
+      ensureSchema(db)
+      await indexSourceFiles(db, assetsRoot)
+
+      // substring of a single token: rg substring semantics preserved
+      expect(findFilesContainingFragment(db, 'refugee')).toEqual(['Defs/race.xml'])
+      // case-insensitive (vocab terms are tokenizer-folded)
+      expect(findFilesContainingFragment(db, 'Refugee')).toEqual(['Defs/race.xml'])
+      // no term contains the fragment
+      expect(findFilesContainingFragment(db, 'refugees')).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+
+  test('MAX_EXPANDED_TERMS is the documented vocab cap', () => {
+    expect(MAX_EXPANDED_TERMS).toBe(5000)
   })
 })

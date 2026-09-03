@@ -1,10 +1,12 @@
-import { spawn } from 'bun'
+import { spawn, Glob } from 'bun'
+import type { Database } from 'bun:sqlite'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { PathSandbox } from '../utils/path-sandbox'
 import { textResponse } from '../utils/mcp-response'
 import { readManifest } from '../utils/manifest'
 import { escapePackageDirName } from '../utils/mod-discovery'
+import { findFilesContainingFragment } from '../repositories/source-fts-repo'
 import type { ManifestMod, ModsManifest } from '../types'
 
 const MAX_OUTPUT_SIZE = 100 * 1024
@@ -25,11 +27,61 @@ export interface SearchSourceOptions {
 }
 
 export async function searchSourceImpl(
+  db: Database,
   sandbox: PathSandbox,
   query: string,
   caseSensitive: boolean = false,
   filePattern?: string,
   options: SearchSourceOptions = {},
+) {
+  // Tolerate the observed misuse "Mods/<packageId>": strip the prefix once
+  // so both scope consumers (path resolution, loaded_only exclusions) see
+  // the bare packageId.
+  const scope = options.scope?.replace(/^mods\//i, '') ?? 'all'
+
+  const resolved = resolveScopePaths(sandbox.basePath, scope)
+  if (resolved.guidance !== undefined) {
+    return { output: '', exceededOutputLimit: false, guidance: resolved.guidance }
+  }
+  // skip scopes that point at directories missing from this dist (a vanilla
+  // sandbox has no Mods/, a mods-less one may lack Source/) instead of
+  // making rg fail
+  const paths = (resolved.paths ?? []).filter(path => {
+    if (path === '.') return true
+    return existsSync(join(sandbox.basePath, path))
+  })
+  if (paths.length === 0) {
+    // requested scope has no files in this dist at all
+    return { output: '', exceededOutputLimit: false }
+  }
+
+  const exclusions = options.loadedOnly
+    ? resolveLoadedOnlyExclusions(
+        scope,
+        options.manifest !== undefined ? options.manifest : readManifest(),
+      )
+    : []
+
+  // A plain identifier can only hit inside a single token, so the FTS vocab
+  // yields a candidate-file superset that scanCandidates filters exactly.
+  // Real regex queries keep the full rg scan.
+  const candidates = /^[A-Za-z0-9_]+$/.test(query)
+    ? findFilesContainingFragment(db, query)
+    : null
+  if (candidates) {
+    return scanCandidates(sandbox, candidates, query, caseSensitive, filePattern, paths, exclusions)
+  }
+  return runRg(sandbox, query, caseSensitive, filePattern, paths, exclusions)
+}
+
+/** Full rg scan for regex queries. Same result shape as scanCandidates. */
+async function runRg(
+  sandbox: PathSandbox,
+  query: string,
+  caseSensitive: boolean,
+  filePattern: string | undefined,
+  paths: string[],
+  exclusions: string[],
 ) {
   const args = ['--line-number', '--heading', '--color', 'never']
 
@@ -45,35 +97,8 @@ export async function searchSourceImpl(
 
   // search pattern + paths
   args.push('-e', query)
+  args.push(...paths)
 
-  // Tolerate the observed misuse "Mods/<packageId>": strip the prefix once
-  // so both scope consumers (path resolution, loaded_only exclusions) see
-  // the bare packageId.
-  const scope = options.scope?.replace(/^mods\//i, '') ?? 'all'
-
-  const resolved = resolveScopePaths(sandbox.basePath, scope)
-  if (resolved.guidance !== undefined) {
-    return { output: '', exceededOutputLimit: false, guidance: resolved.guidance }
-  }
-  // skip scopes that point at directories missing from this dist (a vanilla
-  // sandbox has no Mods/, a mods-less one may lack Source/) instead of
-  // making rg fail
-  const scopePaths = (resolved.paths ?? []).filter(path => {
-    if (path === '.') return true
-    return existsSync(join(sandbox.basePath, path))
-  })
-  if (scopePaths.length === 0) {
-    // requested scope has no files in this dist at all
-    return { output: '', exceededOutputLimit: false }
-  }
-  args.push(...scopePaths)
-
-  const exclusions = options.loadedOnly
-    ? resolveLoadedOnlyExclusions(
-        scope,
-        options.manifest !== undefined ? options.manifest : readManifest(),
-      )
-    : []
   for (const glob of exclusions) {
     args.push('-g', glob)
   }
@@ -123,6 +148,70 @@ export async function searchSourceImpl(
     throw new Error(`rg failed with exit code ${exitCode}: ${stderrText}`)
   }
   throw new Error(`rg failed with exit code ${exitCode}`)
+}
+
+/**
+ * Line-scans the FTS candidate files, reproducing rg's `--line-number
+ * --heading` output shape (heading line, then `N:text`, blank line between
+ * files). Stops reading further files once the output passes
+ * MAX_OUTPUT_SIZE — the same budget that kills a running rg.
+ */
+async function scanCandidates(
+  sandbox: PathSandbox,
+  candidates: string[],
+  query: string,
+  caseSensitive: boolean,
+  filePattern: string | undefined,
+  paths: string[],
+  exclusions: string[],
+) {
+  const scopeRoots = paths.includes('.') ? null : paths
+  // a pattern without '/' matches against the basename only (rg -g semantics);
+  // an anchored one matches the whole sandbox-relative path
+  const basenameGlob =
+    filePattern !== undefined && !filePattern.includes('/')
+      ? new Glob(filePattern)
+      : undefined
+  const pathGlob =
+    filePattern !== undefined && filePattern.includes('/')
+      ? new Glob(filePattern)
+      : undefined
+  const exclusionGlobs = exclusions.map(glob => new Glob(glob.slice(1)))
+  const regex = new RegExp(query, caseSensitive ? '' : 'i')
+
+  let output = ''
+  let bytes = 0
+  let truncated = false
+
+  for (const path of candidates) {
+    if (scopeRoots && !scopeRoots.some(root => path.startsWith(`${root}/`))) continue
+    if (basenameGlob && !basenameGlob.match(basename(path))) continue
+    if (pathGlob && !pathGlob.match(path)) continue
+    if (exclusionGlobs.some(glob => glob.match(path))) continue
+
+    const text = await Bun.file(join(sandbox.basePath, path)).text()
+    const hits: string[] = []
+    let lineNo = 0
+    for (const line of text.split(/\r?\n/)) {
+      lineNo += 1
+      if (regex.test(line)) hits.push(`${lineNo}:${line}`)
+    }
+    if (hits.length === 0) continue
+
+    const block = `${path}\n${hits.join('\n')}`
+    const chunk = output.length === 0 ? block : `\n\n${block}`
+    const chunkBytes = Buffer.byteLength(chunk)
+    if (bytes + chunkBytes > MAX_OUTPUT_SIZE) {
+      // cut at the byte budget, exactly what readStreamWithLimit does to rg
+      output += Buffer.from(chunk).subarray(0, MAX_OUTPUT_SIZE - bytes).toString()
+      truncated = true
+      break
+    }
+    output += chunk
+    bytes += chunkBytes
+  }
+
+  return { output, exceededOutputLimit: truncated }
 }
 
 interface ScopeResolution {
@@ -190,6 +279,7 @@ function resolveLoadedOnlyExclusions(
 }
 
 export async function searchSource(
+  db: Database,
   sandbox: PathSandbox,
   query: string,
   caseSensitive: boolean = false,
@@ -197,6 +287,7 @@ export async function searchSource(
   options: SearchSourceOptions = {},
 ) {
   const { output, exceededOutputLimit, guidance } = await searchSourceImpl(
+    db,
     sandbox,
     query,
     caseSensitive,
@@ -208,7 +299,20 @@ export async function searchSource(
     return textResponse(guidance)
   }
 
-  if (output.length === 0 && !exceededOutputLimit) {
+  // rg prefixes heading lines with './' when the scope searches '.', and
+  // Windows rg may emit backslash separators. Normalize heading lines (the
+  // non-empty ones without a line-number prefix) so the rg and the FTS path
+  // emit the same posix, sandbox-relative shape.
+  const normalized = output
+    .split(/\r?\n/)
+    .map(line =>
+      line.length > 0 && !/^\d+:/.test(line)
+        ? line.replaceAll('\\', '/').replace(/^\.\//, '')
+        : line,
+    )
+    .join('\n')
+
+  if (normalized.length === 0 && !exceededOutputLimit) {
     let message = `No matches for /${query}/ in scope '${options.scope ?? 'all'}'`
     if (filePattern) {
       message += `, file_pattern '${filePattern}'`
@@ -222,7 +326,7 @@ export async function searchSource(
   }
 
   if (exceededOutputLimit) {
-    let truncated = output
+    let truncated = normalized
     truncated += '\n\n[TRUNCATED] Output size exceeded 100KB.'
     truncated +=
       '\n(Tip: Refine your search query or add a more specific `file_pattern`.)'
@@ -230,7 +334,7 @@ export async function searchSource(
   }
 
   const maxLines = Math.min(options.limit ?? MAX_RESULT_LINES, MAX_RESULT_LINES)
-  const lines = output.split(/\r?\n/)
+  const lines = normalized.split(/\r?\n/)
   if (lines.length > maxLines) {
     const truncated = lines.slice(0, maxLines)
     truncated.push(
@@ -244,12 +348,12 @@ export async function searchSource(
 
   if (options.loadedOnly && !(options.manifest !== undefined ? options.manifest : readManifest())) {
     return textResponse(
-      output +
+      normalized +
         '\n\n[Note] No mods manifest found (import-mods never ran); loaded_only was ignored.',
     )
   }
 
-  return textResponse(output)
+  return textResponse(normalized)
 }
 
 // #region Helper

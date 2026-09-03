@@ -141,6 +141,44 @@ describe('read-csharp-symbol', () => {
     expect(text).toContain('public class TypeX')
   })
 
+  test('Type.Member resolves that member, identical to explicit memberName', async () => {
+    const viaSymbol = (await readCsharpSymbol(db, sourcePath, 'Thing.ExposeData'))
+      .content[0].text
+    const viaMember = (
+      await readCsharpSymbol(db, sourcePath, 'Thing', 'ExposeData')
+    ).content[0].text
+
+    expect(viaSymbol).toBe(viaMember)
+    expect(viaSymbol).toContain('public virtual void ExposeData()')
+  })
+
+  test('Namespace.Type.Member resolves the member through two fallbacks', async () => {
+    const text = (
+      await readCsharpSymbol(db, sourcePath, 'Some.Namespace.Thing.ExposeData')
+    ).content[0].text
+
+    expect(text).toContain('// File: Source/Thing.cs')
+    expect(text).toContain('public virtual void ExposeData()')
+  })
+
+  test('Type.NoSuchMember reports the member as not found', async () => {
+    const text = (await readCsharpSymbol(db, sourcePath, 'Thing.Nope'))
+      .content[0].text
+
+    expect(text).toBe(
+      "Member 'Nope' in type 'Thing' not found in index. Please check the name.",
+    )
+  })
+
+  test('explicit memberName with a dotted symbol still resolves the type by its tail', async () => {
+    const text = (
+      await readCsharpSymbol(db, sourcePath, 'Some.Namespace.TypeX', 'SomeField')
+    ).content[0].text
+
+    expect(text).toContain('// File: Source/TypeX.cs')
+    expect(text).toContain('public static int SomeField;')
+  })
+
   test('normalizes file_path variants (./ prefix, backslashes, dist/assets/)', async () => {
     const dotSlash = (
       await readCsharpSymbol(

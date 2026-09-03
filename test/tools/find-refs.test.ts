@@ -122,7 +122,7 @@ describe('find_refs', () => {
 
     // source groups in deterministic order: Defs/ -> Source/ -> Mods/<pkg>
     expect(text).toContain('[Defs/] 1 match')
-    expect(text).toContain('Defs/ThingDefs/Ref_Thing.xml:4:     <defName>Ref_Thing</defName>')
+    expect(text).toContain('Defs/ThingDefs/Ref_Thing.xml:4 [Defs/ThingDef/defName]:     <defName>Ref_Thing</defName>')
     expect(text).toContain('[Source/] 1 match')
     expect(text).toContain('Source/RefTrace.cs:4:')
     expect(text).toContain('[Mods/RefTraceMod] 15 matches')
@@ -162,6 +162,44 @@ describe('find_refs', () => {
     expect(text).not.toContain('Full-text source matches')
     expect(text).not.toContain('Def definitions')
     expect(text).not.toContain('XML patch operations')
+  })
+
+  test('xml hit carries the full ancestor element path', async () => {
+    const result = await findRefs(db, sandbox, 'Deep_Ref')
+    const text = result.content[0].text as string
+
+    // deep <li> inside the HAR-style refugee pool: the path must name every
+    // enclosing element, and the commented-out sibling block must not
+    // pollute the stack (it would duplicate li/kindDefs segments)
+    expect(text).toContain(
+      'Mods/RefTraceMod/Defs/TraceRef.xml:20 [Defs/AlienRace.RaceSettings/pawnKindSettings/alienrefugeekinds/li/kindDefs/li]:',
+    )
+    expect(result.structuredContent.sourceGroups[0]!.hits[0]).toEqual({
+      file: 'Mods/RefTraceMod/Defs/TraceRef.xml',
+      line: 20,
+      text: '            <li>Deep_Ref</li>',
+      path: 'Defs/AlienRace.RaceSettings/pawnKindSettings/alienrefugeekinds/li/kindDefs/li',
+    })
+  })
+
+  test('identifier inside an xml comment is not a reference', async () => {
+    const result = await findRefs(db, sandbox, 'Ghost_Ref')
+
+    expect(result.content[0].text).toBe(
+      'No references to "Ghost_Ref" found in any layer.',
+    )
+  })
+
+  test('xml path tracker does not retain self-closing elements', async () => {
+    const result = await findRefs(db, sandbox, 'After_Ref')
+    const hit = result.structuredContent.sourceGroups[0]!.hits[0]
+
+    expect(hit).toEqual({
+      file: 'Mods/RefTraceMod/Defs/TraceRef.xml',
+      line: 26,
+      text: '        <afterSelfClosing>After_Ref</afterSelfClosing>',
+      path: 'Defs/AlienRace.RaceSettings/pawnKindSettings/alienrefugeekinds/afterSelfClosing',
+    })
   })
 
   test('no hits anywhere yields the no-references message', async () => {
@@ -221,7 +259,9 @@ describe('find_refs', () => {
       file: 'Defs/ThingDefs/Ref_Thing.xml',
       line: 4,
       text: '    <defName>Ref_Thing</defName>',
+      path: 'Defs/ThingDef/defName',
     })
+    expect(sc.sourceGroups[1]!.hits[0]).not.toHaveProperty('path')
     expect(sc.sourceGroups[1]).toMatchObject({ scope: 'vanilla', total: 1 })
     expect(sc.sourceGroups[2]).toMatchObject({ scope: 'RefTraceMod', total: 15 })
     expect(sc.sourceGroups[2]!.hits).toHaveLength(10)
