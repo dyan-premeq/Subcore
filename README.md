@@ -1,21 +1,23 @@
-# RimSage
+# Subcore
 
 [![MCP Server](https://badge.mcpx.dev?type=server)](https://modelcontextprotocol.io/introduction) [![bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun)](https://bun.com/) [![ripgrep](https://img.shields.io/badge/ripgrep-%23000000.svg?style=flat&logo=rust)](https://github.com/BurntSushi/ripgrep)
 
-RimSage is a Model Context Protocol (MCP) server for RimWorld mod development and codebase analysis.
+Subcore is a Model Context Protocol (MCP) server for RimWorld mod development and codebase analysis. The project is an enhanced fork of [**realloon/RimSage**](https://github.com/realloon/RimSage),  overhauled specifically for **modded environments**. 
 
-> **Note**: This project is an enhanced fork of [realloon/RimSage](https://github.com/realloon/RimSage), overhauled specifically for **modded environments**. While upstream focuses on vanilla source and Def browsing, this fork statically reconstructs RimWorld's mod loading pipeline—evaluating XML `PatchOperation` rules in load order, resolving cross-mod `XmlInheritance`, indexing decompiled C# assemblies and Harmony patches, and providing exhaustive cross-layer reference lookups for AI agents.
+Subcore reconstructs RimWorld's mod loading pipeline—evaluating XML `PatchOperation` rules in load order, resolving cross-mod `XmlInheritance`, indexing decompiled C# assemblies and Harmony patches, and providing exhaustive cross-layer reference lookups for AI agents.
 
 ---
 
 ## MCP Tools
 
-RimSage provides 10 tools tailored for AI agent workflows:
+Subcore provides 10 tools tailored for AI agent workflows:
 
 ### Cross-Layer Reference Tracing
+
 - **`find_refs`** — Exhaustive reference lookup across all layers simultaneously: vanilla Defs, C# source, mod XML, decompiled mod assemblies, XML patches, and Harmony hooks. Takes a single identifier (`defName`, C# type, or method).
 
 ### Def Inspection & Discovery
+
 - **`get_def_details`** — Inspect full XML for a specific `defName` along with its override lineage.
   - `view="patched"`: Game runtime truth after XML patches and inheritance resolution.
   - `view="merged"`: Inheritance-resolved XML without patches.
@@ -23,14 +25,17 @@ RimSage provides 10 tools tailored for AI agent workflows:
 - **`search_defs`** — Fast indexed search by partial `defName` or in-game label. Supports `defType` and `mod` filters.
 
 ### Patch & Hook Reverse-Lookup
+
 - **`search_patches`** — Reverse lookup of XML `PatchOperation` rules by target `defName`, patching mod (`packageId`), or operation class (e.g. `PatchOperationReplace`).
 - **`search_harmony`** — Reverse lookup of Harmony patches by target C# class (`targetType`) or method (`targetMethod`). Static analysis of mod C# and assemblies.
 
 ### C# Source Navigation
+
 - **`read_csharp_symbol`** — Read the source code of a C# class, method, or field by name without needing its file path. Resolves across vanilla code and decompiled mod assemblies.
 - **`search_source`** — Regex search with FTS identifier pre-filtering across all source files and Defs. Supports scope (`all`, `vanilla`, `mods`, or a specific `packageId`) and `loaded_only` filters.
 
 ### Workspace & Profile
+
 - **`list_mods`** — Overview of active mods in the profile, load order, asset counts, and dependency/compatibility warnings.
 - **`read_file`** — Read a specific file by relative path with optional line offsets.
 - **`list_directory`** — Browse directory contents within the asset sandbox.
@@ -42,17 +47,20 @@ RimSage provides 10 tools tailored for AI agent workflows:
 ### 1. Prerequisites
 
 - [Bun](https://bun.com/) (v1.0+)
+
 - [ripgrep](https://github.com/BurntSushi/ripgrep)
+
 - *(Optional, for mod assembly decompilation)* [ilspycmd](https://github.com/icsharpcode/ILSpy):
+  
   ```sh
   dotnet tool install -g ilspycmd
   ```
 
-### 2. Clone & Install
+### 2. Install
+
+Clone the repository, then in `Subcore/` folder, run:
 
 ```sh
-git clone https://github.com/dyan-premeq/Modded-RimSage.git
-cd Modded-RimSage
 bun install
 ```
 
@@ -67,16 +75,18 @@ bun run src/scripts/import-csharp.ts /path/to/DecompiledSource
 
 *(Decompiling RimWorld for mod development is permitted under the [RimWorld EULA](https://rimworldgame.com/eula).)*
 
-### 4. (Optional) Configure & Import Mods
+### 4. Configure & Import Mods
 
-RimSage uses a decoupled **profile** (`rimsage.profile.json`) to define which mods to index, independent of your player save state.
+The program uses a decoupled **profile** (`rimsage.profile.json`) to define which mods to index, independent of your player save state.
 
 Generate a profile from your game's active mod list:
+
 ```sh
 bun run import:mods /path/to/RimWorld --from-game-config --out rimsage.profile.json
 ```
 
 Or write `rimsage.profile.json` manually:
+
 ```jsonc
 {
   "name": "my-mod-project",
@@ -91,6 +101,7 @@ Or write `rimsage.profile.json` manually:
 ```
 
 Import mod assets and decompile their assemblies:
+
 ```sh
 bun run import:mods /path/to/RimWorld
 ```
@@ -98,6 +109,7 @@ bun run import:mods /path/to/RimWorld
 ### 5. Build Database Index
 
 Build the SQLite index and patch cache:
+
 ```sh
 bun run build
 ```
@@ -111,9 +123,9 @@ Add to your client's MCP settings (e.g. `.cursor/mcp.json` or `claude_desktop_co
 ```json
 {
   "mcpServers": {
-    "rimsage": {
+    "subcore": {
       "command": "bun",
-      "args": ["run", "/path/to/RimSage/src/stdio.ts"]
+      "args": ["run", "/path/to/Subcore/src/stdio.ts"]
     }
   }
 }
@@ -133,7 +145,7 @@ And configure your client with the local URL:
 ```json
 {
   "mcpServers": {
-    "rimsage": {
+    "subcore": {
       "url": "http://localhost:3000/mcp"
     }
   }
@@ -167,4 +179,3 @@ bun run regression:patches --workshop
 ## License
 
 MIT
-
