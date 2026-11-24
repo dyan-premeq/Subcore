@@ -128,3 +128,11 @@ public static class VanillaExpandedFramework_PawnUtility_Mated_Patch
     expect(records[0].patchClass).toBe('Real')
   })
 })
+
+test('recognizes Harmony attributes on modern C# type declarations', () => {
+  for (const declaration of ['file class', 'public readonly ref struct', 'public readonly record struct', 'public sealed record']) {
+    const [patch] = extractHarmonyPatches('[HarmonyPatch(typeof(Pawn), "Tick")]\n' + declaration + ' Patch {}')
+    expect(patch.patchClass).toBe('Patch')
+    expect(patch.targetMethod).toBe('Tick')
+  }
+})

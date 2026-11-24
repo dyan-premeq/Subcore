@@ -16,8 +16,8 @@ describe('decompile', () => {
       copyFileSync(fixtureDll, join(dir, 'Assemblies/0Harmony.dll'))
 
       // 'definitely-not-installed' never spawns: the skip happens first
-      const stats = decompileAssemblies('definitely-not-installed', ['Assemblies/0Harmony.dll'], dir)
-      expect(stats).toEqual({ decompiled: 0, skipped: 1, failed: [] })
+      const stats = decompileAssemblies('definitely-not-installed', ['Assemblies/0Harmony.dll', 'Assemblies/HarmonyMod.RuntimeIL.dll'], dir)
+      expect(stats).toEqual({ decompiled: 0, skipped: 2, failed: [] })
     } finally {
       await rmTemp(dir)
     }
@@ -86,19 +86,19 @@ describe('decompile', () => {
     const dir = mkdtempSync('rimsage-decompile-real-')
     try {
       mkdirSync(join(dir, 'Assemblies'), { recursive: true })
-      copyFileSync(fixtureDll, join(dir, 'Assemblies/ModAssembly.dll'))
+      copyFileSync(fixtureDll, join(dir, 'Assemblies/HarmonyMod.dll'))
 
-      const first = decompileAssemblies(ilspy!, ['Assemblies/ModAssembly.dll'], dir)
+      const first = decompileAssemblies(ilspy!, ['Assemblies/HarmonyMod.dll'], dir)
       expect(first.decompiled).toBe(1)
-      const outPath = join(dir, 'Source-decompiled/ModAssembly.decompiled.cs')
+      const outPath = join(dir, 'Source-decompiled/HarmonyMod.decompiled.cs')
       expect(existsSync(outPath)).toBe(true)
 
-      const second = decompileAssemblies(ilspy!, ['Assemblies/ModAssembly.dll'], dir)
+      const second = decompileAssemblies(ilspy!, ['Assemblies/HarmonyMod.dll'], dir)
       expect(second.skipped).toBe(1)
 
       // a newer dll invalidates the cached output
-      utimesSync(join(dir, 'Assemblies/ModAssembly.dll'), new Date(), new Date(Date.now() + 5000))
-      const third = decompileAssemblies(ilspy!, ['Assemblies/ModAssembly.dll'], dir)
+      utimesSync(join(dir, 'Assemblies/HarmonyMod.dll'), new Date(), new Date(Date.now() + 5000))
+      const third = decompileAssemblies(ilspy!, ['Assemblies/HarmonyMod.dll'], dir)
       expect(third.decompiled).toBe(1)
     } finally {
       rmSyncSync(dir)

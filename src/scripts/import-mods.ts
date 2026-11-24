@@ -1,8 +1,7 @@
 import { argv, write } from 'bun'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
-  LoadOrderIssue,
   ModInfo,
   ModsManifest,
   Profile,
@@ -24,15 +23,13 @@ import { resolveProfileOrder } from '../utils/load-order'
 import {
   computeEffectiveAssemblies,
   computeEffectiveFiles,
+  normalizeFolderPath,
   selectLoadFolders,
 } from '../utils/load-folders'
 import { decompileAssemblies, findIlspycmd } from '../utils/decompile'
 
-/** Top-level directories copied into dist; version folders recurse by rule. */
-const COPY_DIRS = new Set(['About', 'Defs', 'Patches', 'Source', 'Assemblies', 'Languages'])
-const COPY_ROOT_FILES = new Set(['LoadFolders.xml', 'About.xml'])
-const VERSION_DIR = /^\d+\.\d+$/
-const COMMON_DIR_NAME = 'Common'
+/** Content copied at each declared or legacy load root. */
+const COPY_DIRS = ['About', 'Defs', 'Patches', 'Source', 'Assemblies', 'Languages']
 
 export interface ImportModsOptions {
   gameRoot: string
@@ -125,7 +122,7 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
       assetPath = `Mods/${dirName}`
       const destRoot = join(distModsPath, dirName)
 
-      const copyStats = copyModTree(mod.rootPath, destRoot, full)
+      const copyStats = copyModTree(mod, destRoot, full)
       copiedFiles += copyStats.copied
       skippedFiles += copyStats.skipped
 
@@ -135,8 +132,8 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
       shadowedFiles = effective.shadowed
 
       const assemblies = computeEffectiveAssemblies(mod.rootPath, activeFolders)
+      const stats = decompileAssemblies(ilspyCmd, assemblies, destRoot, full, gameRoot)
       if (ilspyCmd) {
-        const stats = decompileAssemblies(ilspyCmd, assemblies, destRoot, full)
         if (stats.decompiled + stats.failed.length > 0) {
           console.log(
             `[decompile] ${mod.packageId}: ${stats.decompiled} assemblies decompiled, ${stats.skipped} skipped, ${stats.failed.length} failed.`,
@@ -163,6 +160,20 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
       warnings: [...mod.warnings, ...decompileWarnings],
       issues: resolved.issues.filter(issue => issue.packageId === mod.packageId),
     })
+  }
+
+  if (existsSync(distModsPath)) {
+    const pathKey = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path
+    const activeDirs = new Set(
+      manifestMods
+        .filter(mod => mod.assetPath)
+        .map(mod => pathKey(mod.assetPath.slice('Mods/'.length))),
+    )
+    for (const entry of readdirSync(distModsPath, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !activeDirs.has(pathKey(entry.name))) {
+        rmSync(join(distModsPath, entry.name), { recursive: true, force: true })
+      }
+    }
   }
 
   // metadata for mods outside the profile (visible via list_mods, not indexed)
@@ -193,84 +204,74 @@ export interface CopyStats {
   skipped: number
 }
 
-/**
- * Copies a mod's structure preserving the original layout (About/Defs/
- * Patches/Source/Assemblies/Languages + all version folders + Common).
- * Heavy asset dirs (Textures, Sounds, ...) are skipped. Incremental: a file
- * is copied only when mtime or size differs from the destination.
- */
-export function copyModTree(
-  srcRoot: string,
-  destRoot: string,
-  full = false,
-): CopyStats {
-  let copied = 0
-  let skipped = 0
+/** Mirror content directories at declared load roots, walking only their prefixes. */
+export function copyModTree(mod: ModInfo, destRoot: string, full = false): CopyStats {
+  const pathKey = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path
+  const folders = new Set(['.', 'Common', ...mod.versionDirs].map(pathKey))
+  for (const entries of Object.values(mod.loadFolders)) {
+    for (const entry of entries) {
+      if (entry.folderName) folders.add(pathKey(normalizeFolderPath(entry.folderName)))
+    }
+  }
+  const prefixes = new Set<string>()
+  for (const folder of folders) {
+    const parts = folder.split('/')
+    for (let i = 1; i <= parts.length; i++) prefixes.add(parts.slice(0, i).join('/'))
+  }
 
-  // 'root': apply the whitelist (content dirs + version folders);
-  // 'all': inside a whitelisted dir everything is copied.
-  const walk = (srcDir: string, destDir: string, mode: 'root' | 'all') => {
+  const stats = { copied: 0, skipped: 0 }
+  function walk(relative: string, destDir: string, all: boolean) {
+    const srcDir = join(mod.rootPath, relative)
     mkdirSync(destDir, { recursive: true })
+    const stale = new Map(readdirSync(destDir, { withFileTypes: true }).map(e => [pathKey(e.name), e]))
+    if (relative === '.') stale.delete(pathKey('Source-decompiled'))
 
     for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
       const name = entry.name
-      if (name.startsWith('.')) continue // junk/hidden files
-
+      const child = relative === '.' ? name : relative + '/' + name
       const src = join(srcDir, name)
-      const dest = join(destDir, name)
-
-      if (entry.isFile()) {
-        if (mode === 'all' || COPY_ROOT_FILES.has(name)) {
-          if (shouldCopy(src, dest, full)) {
-            copyFileSync(src, dest)
-            copied += 1
-          } else {
-            skipped += 1
-          }
-        } else {
-          skipped += 1
-        }
+      const contentDir = folders.has(pathKey(relative)) && COPY_DIRS.find(dir =>
+        dir === 'About' ? name.toLowerCase() === 'about' : pathKey(dir) === pathKey(name))
+      const destName = contentDir || name
+      const dest = join(destDir, destName)
+      const rootFile = relative === '.' && name.toLowerCase() === 'loadfolders.xml'
+      if (entry.isDirectory()) {
+        if (!all && !contentDir && !prefixes.has(pathKey(child))) continue
+      } else if (!entry.isFile() || (!all && !rootFile) ||
+                 (name.startsWith('.') && !name.toLowerCase().endsWith('.dll'))) {
         continue
       }
 
-      if (!entry.isDirectory()) continue
-
-      if (mode === 'all') {
-        walk(src, dest, 'all')
+      const old = stale.get(pathKey(destName))
+      stale.delete(pathKey(destName))
+      if (old && old.isDirectory() !== entry.isDirectory()) {
+        rmSync(dest, { recursive: true, force: true })
+      } else if (old && old.name !== destName) {
+        renameSync(join(destDir, old.name), dest)
+      }
+      if (entry.isDirectory()) {
+        walk(child, dest, all || Boolean(contentDir))
         continue
       }
 
-      const isContentDir = COPY_DIRS.has(name)
-      const isVersionDir = VERSION_DIR.test(name) || name === COMMON_DIR_NAME
-      if (isContentDir) {
-        walk(src, dest, 'all')
-      } else if (isVersionDir) {
-        walk(src, dest, 'root')
-      } else {
-        // heavy assets or unknown dirs are not copied
-        skipped += countFiles(src)
+      const source = statSync(src)
+      const existing = statSync(dest, { throwIfNoEntry: false })
+      if (!full && existing?.size === source.size &&
+          Math.trunc(existing.mtimeMs) === Math.trunc(source.mtimeMs)) {
+        stats.skipped++
+        continue
       }
+      copyFileSync(src, dest)
+      utimesSync(dest, source.atime, source.mtime)
+      stats.copied++
+    }
+    for (const entry of stale.values()) {
+      rmSync(join(destDir, entry.name), { recursive: true, force: true })
     }
   }
 
-  walk(srcRoot, destRoot, 'root')
-  return { copied, skipped }
-}
-
-function shouldCopy(src: string, dest: string, full: boolean): boolean {
-  if (full || !existsSync(dest)) return true
-  const a = statSync(src)
-  const b = statSync(dest)
-  return a.mtimeMs !== b.mtimeMs || a.size !== b.size
-}
-
-function countFiles(dir: string): number {
-  let count = 0
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) count += countFiles(join(dir, entry.name))
-    else if (entry.isFile()) count += 1
-  }
-  return count
+  walk('.', destRoot, false)
+  return stats
 }
 
 // #endregion

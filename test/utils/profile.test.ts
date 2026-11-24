@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { rmTemp } from '../helpers/fs'
 import { join } from 'node:path'
 import {
   checkProfileGameVersion,
+  discoverModsConfigPath,
   loadProfile,
   parseModsConfig,
   parseProfile,
@@ -55,6 +59,39 @@ describe('profile', () => {
     ])
     expect(profile.autoOrder).toBe(false)
     expect(profile.mods).toEqual(['brrainz.harmony', 'beta.core', 'alpha.tools'])
+  })
+
+  test('discovers the Waylith config paths on Windows, Linux/XDG and macOS', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rimsage-config-'))
+    const keys = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'LOCALAPPDATA', 'RIMSAGE_MODS_CONFIG']
+    const original = keys.map(key => process.env[key])
+    try {
+      process.env.HOME = dir
+      process.env.USERPROFILE = dir
+      process.env.LOCALAPPDATA = join(dir, 'AppData/Local')
+      process.env.XDG_CONFIG_HOME = join(dir, 'custom')
+      delete process.env.RIMSAGE_MODS_CONFIG
+      const suffix = 'Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml'
+      const locations = [
+        ['win32', join(dir, 'AppData/LocalLow', suffix)],
+        ['darwin', join(dir, 'Library/Application Support/RimWorld/Config/ModsConfig.xml')],
+        ['linux', join(dir, 'custom/unity3d', suffix)],
+      ] as const
+      for (const [platform, path] of locations) {
+        await Bun.write(path, '')
+        expect(discoverModsConfigPath(platform)).toBe(path)
+      }
+      delete process.env.XDG_CONFIG_HOME
+      const standard = join(dir, '.config/unity3d', suffix)
+      await Bun.write(standard, '')
+      expect(discoverModsConfigPath('linux')).toBe(standard)
+    } finally {
+      keys.forEach((key, i) => {
+        if (original[i] === undefined) delete process.env[key]
+        else process.env[key] = original[i]
+      })
+      await rmTemp(dir)
+    }
   })
 
   test('reads the player ModsConfig from an explicit path', () => {

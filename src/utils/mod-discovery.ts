@@ -7,7 +7,11 @@ import type {
   ModSource,
 } from '../types'
 import { compareStrings } from './compare'
-import { parser } from './xml-utils'
+import { XMLParser } from 'fast-xml-parser'
+import { DOMParser } from 'slimdom'
+
+// Preserve dotted version strings such as 1.10.
+const metadataParser = new XMLParser({ parseTagValue: false, ignoreDeclaration: true })
 
 // Official package ids in ProductPackageIDs order (ModContentPack.cs:50-62).
 export const PRODUCT_PACKAGE_IDS = [
@@ -31,8 +35,6 @@ const DATA_CATEGORY_PACKAGE_IDS: Record<string, string> = {
   Anomaly: 'ludeon.rimworld.anomaly',
   Odyssey: 'ludeon.rimworld.odyssey',
 }
-
-const VERSION_DIR_PATTERN = /^\d+\.\d+$/
 
 export interface DiscoverModsOptions {
   gameRoot: string
@@ -109,10 +111,19 @@ function discoverDirectory(
   return mods
 }
 
-/**
- * Reads one mod directory: About/About.xml (fallback legacy About.xml at the
- * root), LoadFolders.xml at the mod root, legacy version folders.
- */
+// 1.7 ModMetaData.Init uses GenFile.ResolveCaseInsensitiveFilePath for metadata.
+function resolveMetadataPath(root: string, ...names: string[]): string | undefined {
+  let path = root
+  for (const name of names) {
+    const entries = readdirSync(path, { withFileTypes: true })
+    const entry = entries.find(e => e.name === name)
+      ?? entries.find(e => e.name.toLowerCase() === name.toLowerCase())
+    if (!entry || (name === 'About' && !entry.isDirectory())) return undefined
+    path = join(path, entry.name)
+  }
+  return path
+}
+
 export function readModDir(
   rootPath: string,
   source: ModSource,
@@ -124,18 +135,9 @@ export function readModDir(
   const warnings: string[] = []
   const dirName = basename(rootPath)
 
-  const aboutAbout = join(rootPath, 'About', 'About.xml')
-  const legacyAbout = join(rootPath, 'About.xml')
+  const aboutPath = resolveMetadataPath(rootPath, 'About', 'About.xml')
   let aboutXml: string | undefined
-  let aboutPath: string | undefined
-
-  if (existsSync(aboutAbout)) {
-    aboutPath = aboutAbout
-  } else if (existsSync(legacyAbout)) {
-    // Pre-1.3 layout: About.xml at the mod root.
-    warnings.push('old-format About.xml at mod root (expected About/About.xml)')
-    aboutPath = legacyAbout
-  } else {
+  if (!aboutPath) {
     warnings.push('missing About.xml; using directory name as packageId')
   }
 
@@ -189,6 +191,9 @@ export function readModDir(
 
 // #region About.xml parsing
 
+type VersionEntry = { li?: unknown } | ''
+type VersionBlock = Record<string, VersionEntry | VersionEntry[]>
+
 interface AboutMetaData {
   packageId?: string
   name?: string
@@ -198,27 +203,25 @@ interface AboutMetaData {
   loadAfter?: { li?: unknown }
   loadBefore?: { li?: unknown }
   incompatibleWith?: { li?: unknown }
-  modDependenciesByVersion?: Record<string, { li?: unknown }>
-  loadAfterByVersion?: Record<string, { li?: unknown }>
-  loadBeforeByVersion?: Record<string, { li?: unknown }>
-  incompatibleWithByVersion?: Record<string, { li?: unknown }>
+  modDependenciesByVersion?: VersionBlock
+  loadAfterByVersion?: VersionBlock
+  loadBeforeByVersion?: VersionBlock
+  incompatibleWithByVersion?: VersionBlock
 }
 
 function parseAboutXml(xml: string, warnings: string[]): AboutMetaData | undefined {
   try {
-    const parsed = parser.parse(xml) as { ModMetaData?: AboutMetaData }
-    return parsed.ModMetaData
+    // 1.7 DirectXmlLoader.ItemFromXmlFile reads DocumentElement regardless of its name.
+    const parsed = metadataParser.parse(xml)
+    const key = Object.keys(parsed).find(key => !key.startsWith('?'))
+    return key === undefined ? undefined : parsed[key]
   } catch (error) {
     warnings.push(`failed to parse About.xml: ${String(error)}`)
     return undefined
   }
 }
 
-/**
- * Merges <modDependenciesByVersion> style blocks into the effective lists:
- * the highest version key <= gameVersion wins (replaces the unversioned
- * lists), matching the game's per-version semantics (ModMetaData.Init).
- */
+// 1.7 ModMetaData.InitVersionedData and VersionedData<T>.GetItemForVersion.
 function applyPerVersionData(
   mod: ModInfo,
   meta: AboutMetaData | undefined,
@@ -229,29 +232,35 @@ function applyPerVersionData(
   const current = parseVersionTuple(gameVersion)
   if (!current) return
 
-  const pick = (byVersion?: Record<string, { li?: unknown }>): unknown => {
-    if (!byVersion) return undefined
-    // map raw keys ("v1.6") to normalized version tuples, keep <= current
-    const candidates = Object.keys(byVersion)
-      .map(raw => {
-        const key = normalizeVersionKey(raw)
-        const tuple = key === undefined ? undefined : parseVersionTuple(key)
-        return tuple ? { raw, tuple } : undefined
-      })
-      .filter((e): e is { raw: string; tuple: [number, number, number] } => e !== undefined)
-      .filter(e => compareTuples(e.tuple, current) <= 0)
-      .sort((a, b) => compareTuples(b.tuple, a.tuple))
-    return candidates.length > 0 ? byVersion[candidates[0].raw] : undefined
+  const version = current.slice(0, 2).join('.')
+  const supported = mod.supportedVersions.map(v => parseVersionTuple(v)!)
+  const fallback = supported.some(v => v[0] === current[0] && v[1] === current[1])
+    ? undefined
+    : supported.filter(v => compareTuples(v, current) < 0)
+        .sort((a, b) => compareTuples(b, a))[0]?.slice(0, 2).join('.')
+
+  const pick = (block?: VersionBlock) => {
+    if (!block) return undefined
+    for (const wanted of [version, fallback]) {
+      if (!wanted) continue
+      const key = Object.keys(block).find(k => normalizeVersionKey(k) === wanted)
+      if (key !== undefined) {
+        const entry = block[key]
+        const first = Array.isArray(entry) ? entry[0] : entry
+        return first || {} // An explicit empty block replaces the unversioned list.
+      }
+    }
+    return undefined
   }
 
   const deps = pick(meta.modDependenciesByVersion)
-  if (deps) mod.dependencies = parseDependencyList((deps as { li?: unknown }).li)
+  if (deps !== undefined) mod.dependencies = parseDependencyList(deps.li)
   const after = pick(meta.loadAfterByVersion)
-  if (after) mod.loadAfter = parseStringList((after as { li?: unknown }).li)
+  if (after !== undefined) mod.loadAfter = parseStringList(after.li)
   const before = pick(meta.loadBeforeByVersion)
-  if (before) mod.loadBefore = parseStringList((before as { li?: unknown }).li)
+  if (before !== undefined) mod.loadBefore = parseStringList(before.li)
   const incompatible = pick(meta.incompatibleWithByVersion)
-  if (incompatible) mod.incompatibleWith = parseStringList((incompatible as { li?: unknown }).li)
+  if (incompatible !== undefined) mod.incompatibleWith = parseStringList(incompatible.li)
 }
 
 // #endregion
@@ -264,57 +273,33 @@ function applyPerVersionData(
  * ModLoadFolders.LoadDataFromXmlCustom.
  */
 export function parseLoadFoldersXmlRaw(rootPath: string): ModInfo['loadFolders'] {
-  const path = join(rootPath, 'LoadFolders.xml')
-  if (!existsSync(path)) return {}
+  const path = resolveMetadataPath(rootPath, 'LoadFolders.xml')
+  if (!path) return {}
 
-  let parsed: Record<string, unknown>
+  const result: ModInfo['loadFolders'] = Object.create(null)
   try {
-    parsed = parser.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    const root = new DOMParser().parseFromString(readFileSync(path, 'utf8'), 'text/xml').documentElement
+    // 1.7 ModLoadFolders.LoadDataFromXmlCustom appends repeated blocks in document order.
+    for (const block of root?.children ?? []) {
+      const key = normalizeVersionKey(block.tagName)
+      if (key === undefined) continue
+      const list = result[key] ??= []
+      for (const item of block.children) {
+        const text = (item.textContent ?? '').replaceAll('\\', '/')
+        const entry: LoadFolderEntry = { folderName: text === '/' ? '' : text }
+        const any = splitPackageIds(item.getAttribute('IfModActive'))
+        const all = splitPackageIds(item.getAttribute('IfModActiveAll'))
+        const none = splitPackageIds(item.getAttribute('IfModNotActive'))
+        if (any) entry.requiredAnyOf = any
+        if (all) entry.requiredAllOf = all
+        if (none) entry.disallowedAnyOf = none
+        list.push(entry)
+      }
+    }
   } catch {
     return {}
   }
-
-  const root = parsed.LoadFolders
-  if (!root || typeof root !== 'object') return {}
-
-  const result: ModInfo['loadFolders'] = {}
-  for (const [rawKey, value] of Object.entries(root as Record<string, unknown>)) {
-    const key = normalizeVersionKey(rawKey)
-    if (key === undefined) continue
-    if (!value || typeof value !== 'object') continue
-
-    const listNode = (value as Record<string, unknown>).li
-    const items = listNode === undefined ? [] : Array.isArray(listNode) ? listNode : [listNode]
-    result[key] = items
-      .map(item => parseLoadFolderEntry(item))
-      .filter((e): e is LoadFolderEntry => e !== undefined)
-  }
   return result
-}
-
-function parseLoadFolderEntry(item: unknown): LoadFolderEntry | undefined {
-  if (item === null || item === undefined) return undefined
-
-  const text =
-    typeof item === 'object'
-      ? String((item as Record<string, unknown>)['#text'] ?? '').trim()
-      : String(item).trim()
-
-  // "/" or "\\" means the mod root itself.
-  const folderName =
-    text === '/' || text === '\\' ? '' : text.replaceAll('\\', '/')
-
-  const entry: LoadFolderEntry = { folderName }
-  if (typeof item === 'object') {
-    const attrs = item as Record<string, unknown>
-    const anyOf = splitPackageIds(attrs['@_IfModActive'])
-    const allOf = splitPackageIds(attrs['@_IfModActiveAll'])
-    const notAnyOf = splitPackageIds(attrs['@_IfModNotActive'])
-    if (anyOf) entry.requiredAnyOf = anyOf
-    if (allOf) entry.requiredAllOf = allOf
-    if (notAnyOf) entry.disallowedAnyOf = notAnyOf
-  }
-  return entry
 }
 
 function splitPackageIds(value: unknown): string[] | undefined {
@@ -377,17 +362,18 @@ function parseDependencyList(li: unknown): ModDependency[] {
   })
 }
 
-function parseVersionToken(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  if (!/^\d+\.\d+$/.test(trimmed)) return undefined
-  return trimmed
+// 1.7 VersionControl.TryParseVersionString parses only the first two Int32 components.
+export function parseVersionToken(text: string): string | undefined {
+  const parts = text.split('.').slice(0, 2)
+  if (parts.length !== 2) return undefined
+  const version = parseVersionTuple(parts.join('.'))
+  return version?.slice(0, 2).join('.')
 }
 
 function listVersionDirs(rootPath: string): string[] {
   if (!existsSync(rootPath)) return []
   return readdirSync(rootPath, { withFileTypes: true })
-    .filter(e => e.isDirectory() && VERSION_DIR_PATTERN.test(e.name))
+    .filter(e => e.isDirectory() && parseVersionToken(e.name) !== undefined)
     .map(e => e.name)
 }
 
@@ -404,8 +390,10 @@ export function parseVersionTuple(version: string): [number, number, number] | u
   if (parts.length < 2 || parts.length > 3) return undefined
   const nums: number[] = []
   for (const part of parts) {
-    if (!/^\d+$/.test(part)) return undefined
-    nums.push(Number(part))
+    if (!/^[+-]?\d+$/.test(part.trim())) return undefined
+    const value = Number(part)
+    if (value < 0 || value > 2147483647) return undefined
+    nums.push(value)
   }
   return [nums[0], nums[1], nums[2] ?? 0]
 }

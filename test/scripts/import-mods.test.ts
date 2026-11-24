@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { chmodSync, existsSync, utimesSync, writeFileSync } from 'node:fs'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { chmodSync, existsSync, writeFileSync } from 'node:fs'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { write } from 'bun'
@@ -10,15 +10,18 @@ import { rebuildModsIndex } from '../../src/scripts/index-mods'
 import { listProfileMods } from '../../src/repositories/mods-repo'
 import type { ModsRow } from '../../src/types'
 import { findIlspycmd } from '../../src/utils/decompile'
+import { computeEffectiveAssemblies } from '../../src/utils/load-folders'
 import { rmTemp } from '../helpers/fs'
 
-const gameRoot = join(import.meta.dir, '../fixtures/game-root')
+let gameRoot: string
 
 let distRoot: string
 let modsConfigPath: string
 
 beforeAll(async () => {
   distRoot = await mkdtemp(join(tmpdir(), 'rimsage-import-mods-'))
+  gameRoot = join(distRoot, 'game')
+  await cp(join(import.meta.dir, '../fixtures/game-root'), gameRoot, { recursive: true })
   modsConfigPath = join(gameRoot, 'ModsConfig.xml')
 })
 
@@ -77,6 +80,13 @@ describe('import-mods', () => {
     const gamma = result.manifest.mods.find(mod => mod.packageId === 'gamma.conditional')!
     expect(gamma.activeFolders).toEqual(['GammaBase', 'BetaOnly'])
 
+    for (const mod of result.manifest.mods.filter(mod => mod.assetPath)) {
+      const assemblies = computeEffectiveAssemblies(mod.rootPath, mod.activeFolders)
+      for (const path of [...mod.effectiveFiles, ...assemblies]) {
+        expect(existsSync(join(distRoot, 'assets', mod.assetPath, path))).toBe(true)
+      }
+    }
+
     // discovered but not in profile: metadata only
     const notInProfile = result.manifest.discoveredNotInProfile.map(mod => mod.packageId)
     expect(notInProfile).toContain('delta.noabout')
@@ -90,19 +100,41 @@ describe('import-mods', () => {
     expect(second.copiedFiles).toBe(0)
     expect(second.copiedFiles).toBeLessThanOrEqual(first.copiedFiles)
 
-    // touch a source file -> exactly that file is recopied with --full
-    // skipped; the fixture is restored afterwards so tests never pollute git
     const target = join(gameRoot, 'Mods/BetaCore/Defs/BetaThing.xml')
-    const original = await Bun.file(target).text()
+    await write(target, (await Bun.file(target).text()) + '\n')
+    const third = await run()
+    expect(third.copiedFiles).toBe(1)
+  })
+
+  test('mirrors only content at declared nested roots and prunes removed files and decompiles', async () => {
+    const src = join(gameRoot, 'Mods/GammaConditional')
+    const dest = join(distRoot, 'assets/Mods/gamma.conditional')
+    const xmlPath = join(src, 'LoadFolders.xml')
+    const original = await Bun.file(xmlPath).text()
+    const nested = '1.7/Released/Biotech'
+    await write(xmlPath, '<folders><v1.6><li>1.7</li><li>' + nested + '</li></v1.6></folders>')
     try {
-      const prev = await write(target, original + '\n')
-      void prev
-      utimesSync(target, new Date(), new Date(Date.now() + 1000))
-      const third = await run()
-      expect(third.copiedFiles).toBe(1)
+      for (const path of ['1.7/Defs/A.xml', nested + '/Defs/B.xml', nested + '/Textures/X',
+                          '1.7/Assets.zip', nested + '/Assets.zip.fingerprint', '1.7/Released/Defs/C.xml']) {
+        await write(join(src, path), 'fixture')
+      }
+      await write(join(dest, 'Source-decompiled/Removed.decompiled.cs'), 'stale')
+      const staleMod = join(distRoot, 'assets/Mods/removed.mod')
+      await write(join(staleMod, 'Source/Stale.cs'), 'stale')
+      await run()
+      expect(existsSync(staleMod)).toBe(false)
+      expect(existsSync(join(dest, '1.7/Defs/A.xml'))).toBe(true)
+      expect(existsSync(join(dest, nested, 'Defs/B.xml'))).toBe(true)
+      for (const path of ['1.7/Assets.zip', nested + '/Assets.zip.fingerprint', nested + '/Textures',
+                          '1.7/Released/Defs', 'Source-decompiled/Removed.decompiled.cs', 'GammaBase']) {
+        expect(existsSync(join(dest, path))).toBe(false)
+      }
+      await rm(join(src, '1.7/Defs/A.xml'))
+      await run()
+      expect(existsSync(join(dest, '1.7/Defs/A.xml'))).toBe(false)
     } finally {
-      await write(target, original)
-      utimesSync(target, new Date(), new Date(Date.now() - 1000))
+      await write(xmlPath, original)
+      await rm(join(src, '1.7'), { recursive: true, force: true })
     }
   })
 
@@ -147,14 +179,14 @@ describe('import-mods', () => {
   test('index-mods fails loudly without any imported game version', async () => {
     const dbPath = join(distRoot, 'index.db')
     // no manifest + no version file -> no version authority
-    expect(
+    await expect(
       rebuildModsIndex(
         dbPath,
         join(distRoot, 'assets'),
         join(distRoot, 'no-such-manifest.json'),
         join(distRoot, 'missing-Version.txt'),
       ),
-    ).rejects.toThrow('import:defs')
+    ).rejects.toThrow('import:vanilla')
   })
 
   const ilspy = findIlspycmd()

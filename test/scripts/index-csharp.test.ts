@@ -4,6 +4,8 @@ import { write } from 'bun'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { findCsharpTypes } from '../../src/repositories/csharp-repo'
+import { readCsharpSymbolImpl } from '../../src/tools/read-csharp-symbol'
 import { rebuildCsharpIndex } from '../../src/scripts/index-csharp'
 import { ensureSchema } from '../../src/db/schema'
 import { replaceMods, type ModInsertRow } from '../../src/repositories/mods-repo'
@@ -54,9 +56,9 @@ describe('index-csharp script', () => {
     const assetsRoot = join(tempRoot, 'assets')
     const dbPath = join(tempRoot, 'index.db')
 
-    await mkdir(join(assetsRoot, 'Source/Verse'), { recursive: true })
+    await mkdir(join(assetsRoot, 'Source/Assembly-CSharp/Verse'), { recursive: true })
     await write(
-      join(assetsRoot, 'Source/Verse/Shared.cs'),
+      join(assetsRoot, 'Source/Assembly-CSharp/Verse/Shared.cs'),
       'namespace Verse;\n\npublic class Shared\n{\n}\n',
     )
 
@@ -86,8 +88,31 @@ describe('index-csharp script', () => {
 
       expect(rows).toEqual([
         { modId, filePath: 'Mods/test.mod/Source/Shared.cs' },
-        { modId: null, filePath: 'Source/Verse/Shared.cs' },
+        { modId: null, filePath: 'Source/Assembly-CSharp/Verse/Shared.cs' },
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test('indexes modern type declarations and reads a positional record as one line', async () => {
+    const dir = await makeTempDir()
+    const dbPath = join(dir, 'index.db')
+    const lines = [
+      'public readonly ref struct SpanView {}', 'file class Local {}',
+      'public sealed record Label(string Name);', 'public readonly record struct Value(int X);',
+      'public record Foo(int X);', 'internal record class Other {}',
+    ]
+    await write(join(dir, 'Source/UnityStubs/Types.cs'), lines.join('\n'))
+    await rebuildCsharpIndex(dbPath, dir)
+    const db = new Database(dbPath)
+    try {
+      for (const name of ['SpanView', 'Local', 'Label', 'Value', 'Foo', 'Other']) {
+        expect(findCsharpTypes(db, name)).toHaveLength(1)
+      }
+      const [symbol] = await readCsharpSymbolImpl(dir, findCsharpTypes(db, 'Foo'))
+      expect(symbol.code).toBe('public record Foo(int X);')
+      expect(symbol.lineCount).toBe(1)
     } finally {
       db.close()
     }

@@ -26,7 +26,7 @@ const PATCHES_RE = /(^|\/)Patches(\/|$)/
 
 /**
  * Scans dist/assets/<kind>/<category>/** (vanilla Core + DLC layout produced
- * by import-defs). `kind` is 'Defs' or 'Patches'; the top folder under it
+ * by import:vanilla). `kind` is 'Defs' or 'Patches'; the top folder under it
  * names the vanilla data category.
  */
 export async function scanVanillaFiles(
@@ -42,9 +42,9 @@ export async function scanVanillaFiles(
   for await (const relativePath of glob.scan({ cwd: sourcePath })) {
     const parts = relativePath.split(sep)
     if (parts.length < 2) {
-      // import-defs always writes Data/<category>/<kind>/... — a root-level
+      // import:vanilla always writes <kind>/<category>/... — a root-level
       // file here means a corrupted dist layout
-      console.warn(`Skipping ${relativePath}: no category folder (run import-defs).`)
+      console.warn(`Skipping ${relativePath}: no category folder (run import:vanilla).`)
       continue
     }
     const category = parts[0]

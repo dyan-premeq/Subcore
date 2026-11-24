@@ -154,7 +154,7 @@ describe('load-order', () => {
     expect(result.issues.some(i => i.kind === 'incompatible-with')).toBe(true)
   })
 
-  test('excludes unknown packageIds and version-unsupported mods with issues', () => {
+  test('drops missing mods and keeps unsupported mods with a warning', () => {
     const mods = [
       ...VANILLA,
       mod('mod.old', { supportedVersions: ['1.5'] }),
@@ -165,7 +165,7 @@ describe('load-order', () => {
       { gameVersion: GAME_VERSION },
     )
     expect(ids(result.ordered)).not.toContain('ghost.mod')
-    expect(ids(result.ordered)).not.toContain('mod.old')
+    expect(ids(result.ordered)).toContain('mod.old')
     expect(result.issues.map(i => i.kind).sort()).toEqual(['not-found', 'version-unsupported'])
   })
 

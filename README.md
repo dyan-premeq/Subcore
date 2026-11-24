@@ -50,7 +50,7 @@ Subcore provides 10 tools tailored for AI agent workflows:
 
 - [ripgrep](https://github.com/BurntSushi/ripgrep)
 
-- *(Optional, for mod assembly decompilation)* [ilspycmd](https://github.com/icsharpcode/ILSpy):
+- For assembly decompilation, install [ilspycmd](https://github.com/icsharpcode/ILSpy):
   
   ```sh
   dotnet tool install -g ilspycmd
@@ -66,11 +66,10 @@ bun install
 
 ### 3. Import Vanilla Assets
 
-Extract Defs and C# source from your local game installation and decompiled source:
+Import XML and decompile the RimWorld 1.7 assemblies from your local installation:
 
 ```sh
-bun run src/scripts/import-defs.ts /path/to/RimWorld
-bun run src/scripts/import-csharp.ts /path/to/DecompiledSource
+bun run import:vanilla "<gameRoot>"
 ```
 
 *(Decompiling RimWorld for mod development is permitted under the [RimWorld EULA](https://rimworldgame.com/eula).)*
@@ -155,6 +154,8 @@ And configure your client with the local URL:
 ---
 
 ## How It Works
+
+The vanilla importer rebuilds XML under `Defs/<category>` and `Patches/<category>`. It decompiles each installed target DLL into `Source/<AssemblyName>` when the DLL changes. Pass `--full` to regenerate every assembly.
 
 1. **Load-Order Accurate**: Mods and DLCs are topologically sorted according to `About.xml` dependencies and RimWorld's load rules.
 2. **Patch Before Inheritance**: Faithful to RimWorld's `LoadedModManager`, XML `PatchOperation` modifications run against the raw unified Def tree before `XmlInheritance` resolves templates and abstract parents.

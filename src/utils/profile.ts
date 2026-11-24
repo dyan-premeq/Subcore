@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Profile } from '../types'
 import { modsConfigFromEnv, profilePathFromEnv } from './env'
@@ -132,30 +133,37 @@ export function profileFromModsConfig(activePackageIds: string[], name = 'from-g
 }
 
 /**
- * Auto-discovers the player's ModsConfig.xml:
+ * 1.7 RimWorldWaylith.Bootstrap.ResolvePersistentDataRoot paths for the player's ModsConfig.xml:
  * - Windows: %LOCALAPPDATA%/../LocalLow/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml
- * - Linux:   ~/.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml
- * - macOS:   ~/Library/Application Support/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml
+ * - Linux:   $XDG_CONFIG_HOME (default ~/.config), then unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml
+ * - macOS:   ~/Library/Application Support/RimWorld/Config/ModsConfig.xml
  */
-export function discoverModsConfigPath(): string | undefined {
+export function discoverModsConfigPath(platform = process.platform): string | undefined {
   const override = modsConfigFromEnv()
   if (override) return override
 
-  const home = process.env.HOME ?? process.env.USERPROFILE
-  if (!home) return undefined
+  const home = homedir()
 
-  const candidates: string[] = []
-  const localAppData = process.env.LOCALAPPDATA
-  if (localAppData) {
-    candidates.push(
-      join(dirname(localAppData), 'LocalLow', 'Ludeon Studios', 'RimWorld by Ludeon Studios', 'Config', 'ModsConfig.xml'),
-    )
+  let path: string
+  switch (platform) {
+    case 'win32': {
+      const local = process.env.LOCALAPPDATA
+      if (!local) return undefined
+      path = join(dirname(local), 'LocalLow', 'Ludeon Studios', 'RimWorld by Ludeon Studios', 'Config', 'ModsConfig.xml')
+      break
+    }
+    case 'linux': {
+      const config = process.env.XDG_CONFIG_HOME || join(home, '.config')
+      path = join(config, 'unity3d', 'Ludeon Studios', 'RimWorld by Ludeon Studios', 'Config', 'ModsConfig.xml')
+      break
+    }
+    case 'darwin':
+      path = join(home, 'Library', 'Application Support', 'RimWorld', 'Config', 'ModsConfig.xml')
+      break
+    default:
+      return undefined
   }
-  candidates.push(
-    join(home, '.config', 'unity3d', 'Ludeon Studios', 'RimWorld by Ludeon Studios', 'Config', 'ModsConfig.xml'),
-    join(home, 'Library', 'Application Support', 'Ludeon Studios', 'RimWorld by Ludeon Studios', 'Config', 'ModsConfig.xml'),
-  )
-  return candidates.find(candidate => existsSync(candidate))
+  return existsSync(path) ? path : undefined
 }
 
 export function readPlayerActiveMods(modsConfigPath?: string): string[] | null {

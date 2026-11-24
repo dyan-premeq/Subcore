@@ -1,3 +1,4 @@
+import { CSHARP_TYPE_DECLARATION } from '../utils/csharp-type'
 import { file, Glob } from 'bun'
 import { Database } from 'bun:sqlite'
 import { join } from 'node:path'
@@ -6,9 +7,6 @@ import { ensureSchema } from '../db/schema'
 import { replaceCsharpIndex, type CsharpInsertRow } from '../repositories/csharp-repo'
 import { replaceHarmonyPatches, type HarmonyInsertRow } from '../repositories/harmony-repo'
 import { extractHarmonyPatches } from '../utils/harmony-parse'
-
-const typeRegex =
-  /^\s*(?:public|private|protected|internal|abstract|sealed|static|partial|readonly|unsafe|\s)*\s+(?:class|struct|interface|enum)\s+([a-zA-Z0-9_]+)/
 
 // scan roots: the vanilla decompile plus every imported mod's root Source/
 // and decompiled assemblies. Old version folders stay unindexed (reference
@@ -63,7 +61,7 @@ export async function rebuildCsharpIndex(
 
         const lines = content.split(/\r?\n/)
         lines.forEach((line, index) => {
-          const match = line.match(typeRegex)
+          const match = line.match(CSHARP_TYPE_DECLARATION)
           if (match) {
             typeRows.push({
               typeName: match[1],

@@ -138,7 +138,7 @@ function synthesizeVanillaBaseMods(
 
 /**
  * Version authority is what the import steps brought in: dist/Version.txt
- * (written by import-defs) or the mods manifest (import-mods).
+ * (written by import:vanilla) or the mods manifest (import-mods).
  * No silent default — fail loudly.
  */
 function readGameVersion(manifest: ModsManifest | null, distVersionPath: string): string {
@@ -149,7 +149,7 @@ function readGameVersion(manifest: ModsManifest | null, distVersionPath: string)
   if (manifest?.gameVersion) return manifest.gameVersion
   throw new Error(
     'Game version unknown: dist/Version.txt is missing or unparseable. ' +
-      'Run "bun run import:defs <gameRoot>".',
+      'Run "bun run import:vanilla <gameRoot>".',
   )
 }
 

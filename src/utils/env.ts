@@ -1,13 +1,12 @@
 import { join } from 'node:path'
 
 export const root = join(import.meta.dir, '../../')
-const distPath = join(root, 'dist')
+export const distPath = join(root, 'dist')
 
 export const versionPath = join(distPath, 'Version.txt')
 export const assetsPath = join(distPath, 'assets')
 export const defsPath = join(distPath, 'assets/Defs')
 export const patchesPath = join(distPath, 'assets/Patches')
-export const sourcePath = join(distPath, 'assets/Source')
 export const modsAssetPath = join(distPath, 'assets/Mods')
 export const indexDbPath = join(distPath, 'index.db')
 export const modsManifestPath = join(distPath, 'mods-manifest.json')

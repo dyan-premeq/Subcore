@@ -88,6 +88,20 @@ describe('load-folders', () => {
     expect(selectLoadFolders(gamma, '1.5.4100', PROFILE)).toEqual(['Old'])
   })
 
+  test('1.7 sorts eligible raw keys descending and distinguishes missing and empty blocks', () => {
+    const select = (loadFolders: ModInfo['loadFolders'], version = '1.7.5014') =>
+      selectLoadFolders(mod(gameRoot, { loadFolders }), version, PROFILE)
+    const folders = { '1.9': [{ folderName: 'Nine' }], '1.10': [{ folderName: 'Ten' }] }
+    expect(select(folders, '1.10.10')).toEqual(['Nine'])
+    expect(select({ ...folders, '1.10.10': [] }, '1.10.10')).toEqual(['Nine'])
+    expect(select({ ...folders, '1.10.10': [{ folderName: 'Build' }] }, '1.10.10')).toEqual(['Build'])
+    expect(select({ '1.7': [], default: [{ folderName: 'Default' }] })).toEqual([])
+    expect(select({ default: [] })).toEqual([])
+    expect(select({ '1.8': [] })).toEqual(['.'])
+    const newer = mod(gameRoot, { versionDirs: ['1.9', '1.8.123'], loadFolders: { '1.8': [] } })
+    expect(selectLoadFolders(newer, '1.7.5014', PROFILE)).toEqual(['1.8', '.'])
+  })
+
   test('the last declared <li> has the highest priority (game AddFolders reverses)', () => {
     const m = mod('/mods/x', {
       loadFolders: {

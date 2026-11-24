@@ -1,49 +1,31 @@
 import { existsSync, readdirSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { join, posix, sep } from 'node:path'
 import type { LoadFolderEntry, ModInfo } from '../types'
 import {
   compareTuples,
   packageIdNoSuffix,
   parseVersionTuple,
+  parseVersionToken,
 } from './mod-discovery'
 
 const ROOT_FOLDER = '.'
 const COMMON_FOLDER = 'Common'
-const VERSION_DIR_PATTERN = /^\d+\.\d+$/
 const XML_FOLDER_PATHS = ['Defs', 'Patches']
 
-/**
- * Selects the load folders for a mod at the given game version, in descending
- * in-mod priority (first element wins file shadowing). Replicates
- * ModContentPack.InitLoadFolders (1.6.4871):
- *
- * - LoadFolders.xml present with any version key:
- *     1. exact key match (full game version string)
- *     2. highest defined key <= current version (excluding "default")
- *     3. the "default" key
- *   -> only the folders of that key are used (IfModActive/All/NotActive
- *   filtered); Common/root are NOT appended in this branch.
- * - legacy: <root>/<major.minor> if it exists, else the highest 'N.N' folder
- *   <= current version; then <root>/Common if present; then the mod root.
- */
+/** 1.7 ModContentPack.InitLoadFolders returns load roots in descending file priority. */
 export function selectLoadFolders(
   mod: ModInfo,
   gameVersion: string,
   profilePackages: Set<string>,
 ): string[] {
-  const versionKeys = Object.keys(mod.loadFolders)
-
-  if (versionKeys.length > 0) {
-    const key = pickLoadFoldersKey(mod, gameVersion)
-    if (key) {
-      const entries = mod.loadFolders[key]
-        .filter(entry => shouldLoadFolder(entry, profilePackages))
-        .map(entry => (entry.folderName === '' ? ROOT_FOLDER : normalizeFolderPath(entry.folderName)))
-      // The game iterates the declared list in reverse (AddFolders), so the
-      // LAST <li> has the highest priority.
-      return entries.reverse()
-    }
-    // no usable key -> fall through to legacy handling (game behavior)
+  const key = pickLoadFoldersKey(mod, gameVersion)
+  if (key) {
+    const entries = mod.loadFolders[key]
+      .filter(entry => shouldLoadFolder(entry, profilePackages))
+      .map(entry => (entry.folderName === '' ? ROOT_FOLDER : normalizeFolderPath(entry.folderName)))
+    // The game iterates the declared list in reverse (AddFolders), so the
+    // LAST <li> has the highest priority.
+    return entries.reverse()
   }
 
   const folders: string[] = []
@@ -52,12 +34,22 @@ export function selectLoadFolders(
   if (existsSync(join(mod.rootPath, withoutBuild))) {
     folders.push(withoutBuild)
   } else {
-    const best = mod.versionDirs
-      .map(name => ({ name, tuple: parseVersionTuple(name) }))
-      .filter((e): e is { name: string; tuple: [number, number, number] } => e.tuple !== undefined)
-      .filter(e => compareTuples(e.tuple, parseVersionTuple(gameVersion) ?? [0, 0, 0]) <= 0)
-      .sort((a, b) => compareTuples(b.tuple, a.tuple))[0]
-    if (best) folders.push(best.name)
+    // 1.7 ModContentPack.InitLoadFolders can pick the first newer version
+    // while the selected major is zero. Keep the game's two conditions.
+    const current = parseVersionTuple(gameVersion)!
+    const versions = mod.versionDirs
+      .map(parseVersionToken)
+      .filter((v): v is string => v !== undefined)
+      .map(v => parseVersionTuple(v)!)
+      .sort(compareTuples)
+    let selected: [number, number, number] = [0, 0, 0]
+    for (const candidate of versions) {
+      if ((compareTuples(candidate, selected) > 0 || compareTuples(selected, current) > 0) &&
+          (compareTuples(candidate, current) <= 0 || selected[0] === 0)) {
+        selected = candidate
+      }
+    }
+    if (selected[0] > 0) folders.push(selected.slice(0, 2).join('.'))
   }
 
   if (existsSync(join(mod.rootPath, COMMON_FOLDER))) {
@@ -70,23 +62,17 @@ export function selectLoadFolders(
 function pickLoadFoldersKey(mod: ModInfo, gameVersion: string): string | undefined {
   const keys = Object.keys(mod.loadFolders)
 
-  // 1. exact match on the full version string
-  if (mod.loadFolders[gameVersion] !== undefined) return gameVersion
+  // 1.7 ModContentPack.InitLoadFolders tests Count only for the exact-build shortcut.
+  if (mod.loadFolders[gameVersion]?.length) return gameVersion
 
-  // 2. highest defined version key <= current ("1.6" < "1.6.4871")
-  // NB: the game orders candidate keys by raw string descending (orderby x
-  // descending, InitLoadFolders); we sort by version tuple so keys like
-  // "1.10" order correctly. Diverges only for multi-digit minor versions —
-  // accepted, deterministic.
   const current = parseVersionTuple(gameVersion)
   if (current) {
-    const candidates = keys
-      .filter(key => key !== 'default' && key !== '')
-      .map(key => ({ key, tuple: parseVersionTuple(key) }))
-      .filter((e): e is { key: string; tuple: [number, number, number] } => e.tuple !== undefined)
-      .filter(e => compareTuples(e.tuple, current) <= 0)
-      .sort((a, b) => compareTuples(b.tuple, a.tuple))
-    if (candidates.length > 0) return candidates[0].key
+    // The game filters numerically, then orders the original key strings descending.
+    const key = keys.sort().reverse().find(key => {
+      const version = parseVersionTuple(key)
+      return version && compareTuples(version, current) <= 0
+    })
+    if (key !== undefined) return key
   }
 
   // 3. default
@@ -117,8 +103,8 @@ export function shouldLoadFolder(entry: LoadFolderEntry, profilePackages: Set<st
   return true
 }
 
-function normalizeFolderPath(folder: string): string {
-  return folder.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '')
+export function normalizeFolderPath(folder: string): string {
+  return posix.normalize(folder.replaceAll('\\', '/')).replace(/\/+$/, '')
 }
 
 // #region File shadowing (index-time effective set)
@@ -195,7 +181,7 @@ export function computeEffectiveAssemblies(
   return Array.from(seen.values())
 }
 
-function listXmlFiles(dir: string): string[] {
+export function listXmlFiles(dir: string): string[] {
   const out: string[] = []
   const walk = (current: string) => {
     for (const entry of readdirSync(current, { withFileTypes: true })) {

@@ -68,13 +68,13 @@ export function resolveProfileOrder(
       })
       continue
     }
+    // RimWorld 1.7 ModsConfig.DeactivateNotInstalledMods keeps installed active mods regardless of supportedVersions.
     if (!isVersionSupported(mod, opts.gameVersion)) {
       issues.push({
         packageId: id,
         kind: 'version-unsupported',
-        detail: `mod does not list game version ${opts.gameVersion} in supportedVersions; excluded from profile`,
+        detail: `mod does not list game version ${opts.gameVersion} in supportedVersions`,
       })
-      continue
     }
     if (baseIds.has(id)) continue // already provided by the vanilla base
     selected.push(mod)

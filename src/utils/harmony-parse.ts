@@ -1,3 +1,4 @@
+import { CSHARP_TYPE_DECLARATION } from './csharp-type'
 // Static Harmony-patch extraction from C# source text (mod Source/ and
 // decompiled assemblies). Three statically parseable patterns; anything
 // runtime-resolved is recorded as targetType='dynamic'.
@@ -18,9 +19,6 @@ export interface HarmonyPatchRecord {
   transpiler: boolean
   finalizer: boolean
 }
-
-const CLASS_REGEX =
-  /^\s*(?:public|private|protected|internal|abstract|sealed|static|partial|readonly|unsafe|\s)*\s+(?:class|struct|interface|enum)\s+([a-zA-Z0-9_]+)/
 
 const PATCH_ALL_REGEX = /\.PatchAll\s*\(/
 const MANUAL_CALL_REGEX = /\.Patch\s*\(/
@@ -80,7 +78,7 @@ export function extractHarmonyPatches(content: string): HarmonyPatchRecord[] {
       return
     }
 
-    const classMatch = trimmed.match(CLASS_REGEX)
+    const classMatch = trimmed.match(CSHARP_TYPE_DECLARATION)
     if (classMatch) {
       const attrText = attrBuffer.join(' ')
       attrBuffer = []
