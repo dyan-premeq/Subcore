@@ -19,20 +19,37 @@ const name = 'rimsage'
 const version = pkg.version
 const sandbox = new PathSandbox('dist/assets')
 
-const instructions = `RimSage indexes a local RimWorld install plus a dev profile of mods. Read-only.
+const instructions = `Subcore indexes a local RimWorld install plus a dev profile of mods. Read-only.
 
 Routing:
 - Know the defName -> get_def_details (view=patched for what the game actually
   loads; merged for the inheritance-resolved authoring view)
-- Looking for a def -> search_defs (indexed, fast)
-- Any other XML/C# text -> search_source (regex, slow, last resort)
+- Looking for or listing defs -> search_defs (indexed, fast; omit query to
+  enumerate all defs for a mod and/or defType)
+- Colloquial / slang / paraphrased descriptions -> if literal keywords return 0
+  hits, stop guessing synonyms: call list_mods to spot candidate mods, then
+  search_defs with mod + defType (e.g. IncidentDef, QuestScriptDef, ThingDef,
+  HediffDef) to inspect real candidates.
+- Know the C# class or method -> read_csharp_symbol (prefer over read_file on
+  large .cs files)
+- "Who references / triggers / uses this def, class or method?" -> find_refs
+  (exhaustive across vanilla + mod XML, C#, XML patches, Harmony). Verify a C#
+  class or Def is actually referenced before treating it as active content.
 - "Who changed this def?" -> search_patches (filters: defName / packageId / opClass)
 - "Who hooks this C# method?" -> search_harmony (Harmony patches)
-- "Who references / uses this def, class or method?" -> find_refs (exhaustive, all layers)
+- Any other XML/C# text -> search_source (regex, slow, last resort)
 - What is in the profile -> list_mods (overview; detail:true + page for per-mod folders/assets/warnings)
 - structuredContent: search_defs/search_patches/search_harmony/find_refs/list_mods/list_directory/get_def_details return it; search_source/read_file/read_csharp_symbol are text-only.
 
-Data boundaries:
+Verification & data boundaries:
+- Never guess runtime mechanics from XML tag or field names alone (e.g.
+  workerClass, StorytellerCompProperties_*, QuestNode_*, CompProperties_*,
+  delayTicks, minRefireDays). Use read_csharp_symbol on BOTH the mod C# class
+  and its vanilla Assembly-CSharp base/comp class to confirm exact trigger
+  conditions and behavior.
+- Prefer get_def_details and read_csharp_symbol over large read_file ranges.
+  When reading an XML slice with read_file, check the enclosing <Def> header
+  (defName) so fields are not misattributed to another def.
 - Mod dependencies / loadAfter / incompatibleWith are not indexed. Read the
   mod's About/About.xml with read_file when asked. Dependency PROBLEMS
   (missing, incompatible, cycles, version mismatch) already appear in
@@ -62,7 +79,7 @@ function registerTools(server: McpServer) {
         file_pattern: z
           .string()
           .optional()
-          .describe("Glob filter (e.g. '*.cs', 'Defs/**/*.xml')."),
+          .describe("Glob filter (e.g. '*.cs', 'Defs/**/*.xml', '1.6/Languages/**/*.xml')."),
         case_sensitive: z
           .boolean()
           .default(false)
@@ -71,7 +88,7 @@ function registerTools(server: McpServer) {
           .string()
           .optional()
           .describe(
-            "Valid: 'all' (default), 'vanilla' (Defs + Source), 'mods', or a packageId (e.g. 'mehni.pickupandhaul').",
+            "Valid: 'all' (default), 'vanilla' (Defs + Patches + Source), 'mods', or a packageId (e.g. 'mehni.pickupandhaul').",
           ),
         loaded_only: z
           .boolean()
@@ -108,15 +125,15 @@ function registerTools(server: McpServer) {
         path: z
           .string()
           .describe(
-            'Path (e.g. `Source/RimWorld/AbilityDef.cs`, `Defs/Core/AbilityDefs/AbilityDefs.xml`).',
+            'Path (e.g. `Source/Assembly-CSharp/RimWorld/AbilityDef.cs`, `Defs/Core/AbilityDefs/AbilityDefs.xml`).',
           ),
         start_line: z
           .number()
           .int()
-          .min(0)
+          .min(1)
           .max(2_000_000)
-          .default(0)
-          .describe('0-indexed start line.'),
+          .default(1)
+          .describe('1-based start line.'),
         line_count: z
           .number()
           .int()
@@ -142,7 +159,7 @@ function registerTools(server: McpServer) {
         path: z
           .string()
           .default('')
-          .describe('Path (e.g. `Source/Verse`). Empty for root.'),
+          .describe('Path (e.g. `Source/Assembly-CSharp/Verse`). Empty for root.'),
         limit: z
           .number()
           .int()
@@ -202,9 +219,14 @@ function registerTools(server: McpServer) {
     {
       title: 'Search Defs',
       description:
-        '"Is there a def named or labelled X?" Fast indexed lookup by partial defName or in-game label. Use when you lack the exact defName; switch to get_def_details once you have it.',
+        '"Is there a def named or labelled X, or what defs does mod Y define?" Fast indexed lookup by partial defName or in-game label; omit query to list all defs matching defType and/or mod. Switch to get_def_details once you have the exact defName.',
       inputSchema: z.strictObject({
-        query: z.string().describe('Case-insensitive keyword.'),
+        query: z
+          .string()
+          .default('')
+          .describe(
+            'Case-insensitive keyword (defName or label); omit or "" to list all defs matching defType / mod.',
+          ),
         defType: z
           .string()
           .optional()

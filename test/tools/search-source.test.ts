@@ -191,11 +191,14 @@ describe('search-source scope', () => {
     await rm(testDir, { recursive: true, force: true })
   })
 
-  test('scope=vanilla searches only game Defs/Source', async () => {
+  test('scope=vanilla searches only game Defs/Patches/Source', async () => {
+    await write(join(testDir, 'Patches', 'vanilla_patch.xml'), 'target_vanilla_patch')
+    await indexSourceFiles(db, testDir)
     const result = await searchSourceImpl(db, sandbox, 'target_', false, undefined, {
       scope: 'vanilla',
     })
     expect(result.output).toContain('vanilla.xml')
+    expect(result.output).toContain('vanilla_patch.xml')
     expect(result.output).not.toContain('Mods')
   })
 
@@ -207,7 +210,7 @@ describe('search-source scope', () => {
     expect(result.output).not.toContain('vanilla.xml')
   })
 
-  test('scope=packageId searches one mod; unknown ids yield guidance', async () => {
+  test('scope=packageId searches one mod; unknown ids yield guidance with isError', async () => {
     const result = await searchSourceImpl(db, sandbox, 'target_', false, undefined, {
       scope: 'm1',
     })
@@ -218,6 +221,12 @@ describe('search-source scope', () => {
       scope: 'nope.mod',
     })
     expect(unknown.guidance).toContain('nope.mod')
+
+    const mcpResp = await searchSource(db, sandbox, 'target_', false, undefined, {
+      scope: 'nope.mod',
+    })
+    expect(mcpResp.isError).toBe(true)
+    expect(mcpResp.content[0].text).toContain('nope.mod')
   })
 
   test('scope "Mods/<packageId>" (any case) resolves like the bare packageId', async () => {
@@ -246,7 +255,7 @@ describe('search-source scope', () => {
     expect(unknown.guidance).not.toContain('dist/')
   })
 
-  test('loaded_only=true excludes non-active version folders and shadowed files', async () => {
+  test('loaded_only=true excludes non-active version folders, shadowed files, and preserves scope guidance', async () => {
     const manifest = {
       generatedAt: '',
       gameVersion: '1.6',
@@ -270,11 +279,26 @@ describe('search-source scope', () => {
           warnings: [],
           activeFolders: ['1.6', '.'],
           effectiveFiles: ['1.6/Defs/active.xml'],
-          shadowedFiles: ['Defs/shadowed.xml'],
+          shadowedFiles: [process.platform === 'win32' ? 'defs/SHADOWED.xml' : 'Defs/shadowed.xml'],
           issues: [],
         },
       ],
-      discoveredNotInProfile: [],
+      discoveredNotInProfile: [
+        {
+          packageId: 'unloaded.mod',
+          name: 'Unloaded',
+          source: 'workshop' as const,
+          rootPath: '/workshop/unloaded',
+          supportedVersions: ['1.6'],
+          loadFolders: {},
+          versionDirs: [],
+          dependencies: [],
+          loadAfter: [],
+          loadBefore: [],
+          incompatibleWith: [],
+          warnings: [],
+        },
+      ],
     }
 
     const loaded = await searchSourceImpl(db, sandbox, 'target_mod', false, undefined, {
@@ -285,6 +309,63 @@ describe('search-source scope', () => {
     expect(loaded.output).toContain('active.xml')
     expect(loaded.output).not.toContain('old.xml')
     expect(loaded.output).not.toContain('shadowed.xml')
+
+    const regex = await searchSourceImpl(db, sandbox, 'target_mod_(active|shadowed)', false, '*.xml', {
+      scope: 'mods', loadedOnly: true, manifest,
+    })
+    expect(regex.output).toContain('active.xml')
+    expect(regex.output).not.toContain('shadowed.xml')
+
+    // loaded_only=true preserves unknown-scope, non-profile-mod, and missing-Mods guidance
+    const unknownLoaded = await searchSource(db, sandbox, 'target_', false, undefined, {
+      scope: 'nope.mod', loadedOnly: true, manifest,
+    })
+    expect(unknownLoaded.isError).toBe(true)
+    expect(unknownLoaded.content[0].text).toContain('Unknown scope "nope.mod"')
+
+    const inactiveLoaded = await searchSource(db, sandbox, 'target_', false, undefined, {
+      scope: 'unloaded.mod', loadedOnly: true, manifest,
+    })
+    expect(inactiveLoaded.isError).toBe(true)
+    expect(inactiveLoaded.content[0].text).toContain('not in the active profile')
+    expect(inactiveLoaded.content[0].text).toContain('loaded_only=false')
+
+    const empty = await searchSourceImpl(db, sandbox, 'target_.*', false, undefined, {
+      scope: 'mods', loadedOnly: true, manifest: { ...manifest, mods: [] },
+    })
+    expect(empty).toEqual({ output: '', exceededOutputLimit: false })
+
+    await rm(join(testDir, 'Mods'), { recursive: true, force: true })
+    const noModsLoaded = await searchSource(db, sandbox, 'target_', false, undefined, {
+      scope: 'mods', loadedOnly: true, manifest: { ...manifest, mods: [] },
+    })
+    expect(noModsLoaded.isError).toBe(true)
+    expect(noModsLoaded.content[0].text).toContain('No mods imported yet')
+
+    // restore Mods/m1 fixtures for remaining checks in this test
+    await write(join(testDir, 'Mods/m1/1.6/Defs/active.xml'), 'target_mod_active')
+    await write(join(testDir, 'Mods/m1/1.5/Defs/old.xml'), 'target_mod_old')
+    await write(join(testDir, 'Mods/m1/Defs/shadowed.xml'), 'target_mod_shadowed')
+
+    for (const [folder, name] of [
+      ['1.7', 'Direct'], ['1.7/Biotech', 'InactiveChild'],
+      ['1.6/Released', 'Nested'], ['1.6', 'InactiveParent'], ['Old', 'Old'],
+    ]) {
+      await write(join(testDir, 'Mods/m1', folder, 'Source', name + '.cs'), 'needle')
+    }
+    await write(join(testDir, 'Mods/m1/1.7/Defs/Other.xml'), 'needle')
+    await indexSourceFiles(db, testDir)
+    manifest.mods[0].activeFolders = ['1.7', '1.6/Released']
+    for (const query of ['needle', 'need(le)']) {
+      const result = await searchSourceImpl(db, sandbox, query, false, '*.cs', {
+        scope: 'm1', loadedOnly: true, manifest,
+      })
+      expect(result.output).toContain('Nested.cs')
+      expect(result.output).toContain('Direct.cs')
+      expect(result.output).not.toContain('Inactive')
+      expect(result.output).not.toContain('Old.cs')
+      expect(result.output).not.toContain('Other.xml')
+    }
 
     const everything = await searchSourceImpl(db, sandbox, 'target_mod', false, undefined, {
       scope: 'mods',
@@ -322,5 +403,22 @@ describe('search-source scope', () => {
     expect(alternation.output).toContain('old.xml')
     expect(alternation.output).not.toContain('shadowed.xml')
     expect(alternation.output).not.toContain('vanilla.xml')
+  })
+
+  test('subpath file_pattern without leading Mods/ or **/ matches mod files on both FTS and rg paths', async () => {
+    for (const query of ['target_mod_active', 'target_mod_(active)']) {
+      const byModFolder = await searchSource(db, sandbox, query, false, 'm1/1.6/**')
+      expect(byModFolder.content[0].text).toContain('Mods/m1/1.6/Defs/active.xml')
+
+      const bySubpathInModScope = await searchSource(db, sandbox, query, false, '1.6/Defs/*.xml', {
+        scope: 'm1',
+      })
+      expect(bySubpathInModScope.content[0].text).toContain('Mods/m1/1.6/Defs/active.xml')
+
+      const byDefsInModScope = await searchSource(db, sandbox, query, false, 'Defs/*.xml', {
+        scope: 'm1',
+      })
+      expect(byDefsInModScope.content[0].text).toContain('Mods/m1/1.6/Defs/active.xml')
+    }
   })
 })

@@ -8,7 +8,7 @@ import {
 } from '../repositories/defs-repo'
 
 export interface SearchDefsOptions {
-  query: string
+  query?: string
   defType?: string
   mod?: string
   limit?: number
@@ -18,7 +18,7 @@ export interface SearchDefsOptions {
 
 export function searchDefsImpl(
   db: Database,
-  query: string,
+  query: string = '',
   defType?: string,
   mod?: string,
   limit: number = 20,
@@ -47,7 +47,7 @@ export type SearchDefsStructured = z.infer<typeof searchDefsOutputSchema>
 
 export function searchDefs(
   db: Database,
-  query: string,
+  query: string = '',
   defType?: string,
   mod?: string,
   limit: number = 20,

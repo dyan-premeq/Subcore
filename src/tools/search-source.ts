@@ -1,19 +1,41 @@
 import { spawn, Glob } from 'bun'
 import type { Database } from 'bun:sqlite'
 import { existsSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, posix } from 'node:path'
 import { PathSandbox } from '../utils/path-sandbox'
 import { textResponse } from '../utils/mcp-response'
 import { readManifest } from '../utils/manifest'
 import { escapePackageDirName } from '../utils/mod-discovery'
 import { findFilesContainingFragment } from '../repositories/source-fts-repo'
-import type { ManifestMod, ModsManifest } from '../types'
+import type { ModsManifest } from '../types'
 
 const MAX_OUTPUT_SIZE = 100 * 1024
 const MAX_RESULT_LINES = 400
 const STDERR_CAPTURE_SIZE = 8 * 1024
+const SANDBOX_ROOT_DIRS = new Set(['defs', 'patches', 'source', 'mods', 'data'])
 
 export type SearchScope = 'vanilla' | 'mods' | 'all' | string
+
+function normalizeFilePattern(
+  sandboxRoot: string,
+  scope: SearchScope,
+  filePattern: string | undefined,
+): string | undefined {
+  if (!filePattern || filePattern.startsWith('!')) return filePattern
+  const clean = filePattern.replaceAll('\\', '/').replace(/^\.?\/+/, '')
+  if (!clean.includes('/')) return clean
+  const firstSeg = clean.slice(0, clean.indexOf('/'))
+  if (firstSeg === '*' || firstSeg === '**') return clean
+  const lower = firstSeg.toLowerCase()
+  if (scope === 'all' || scope === 'vanilla') {
+    if (SANDBOX_ROOT_DIRS.has(lower) || existsSync(join(sandboxRoot, firstSeg))) {
+      return clean
+    }
+  } else if (lower === 'mods') {
+    return clean
+  }
+  return `**/${clean}`
+}
 
 export interface SearchSourceOptions {
   /** 'vanilla' | 'mods' | 'all' (default) | a packageId */
@@ -39,28 +61,20 @@ export async function searchSourceImpl(
   // the bare packageId.
   const scope = options.scope?.replace(/^mods\//i, '') ?? 'all'
 
-  const resolved = resolveScopePaths(sandbox.basePath, scope)
+  const manifest = options.loadedOnly
+    ? (options.manifest === undefined ? readManifest() : options.manifest)
+    : null
+  const resolved = manifest
+    ? loadedScope(sandbox.basePath, scope, manifest)
+    : resolveScopePaths(sandbox.basePath, scope)
   if (resolved.guidance !== undefined) {
     return { output: '', exceededOutputLimit: false, guidance: resolved.guidance }
   }
-  // skip scopes that point at directories missing from this dist (a vanilla
-  // sandbox has no Mods/, a mods-less one may lack Source/) instead of
-  // making rg fail
-  const paths = (resolved.paths ?? []).filter(path => {
-    if (path === '.') return true
-    return existsSync(join(sandbox.basePath, path))
-  })
-  if (paths.length === 0) {
-    // requested scope has no files in this dist at all
-    return { output: '', exceededOutputLimit: false }
-  }
+  const exclusions = resolved.exclusions ?? []
+  const paths = (resolved.paths ?? []).filter(path => existsSync(sandbox.validateAndResolve(path)))
+  if (paths.length === 0) return { output: '', exceededOutputLimit: false }
 
-  const exclusions = options.loadedOnly
-    ? resolveLoadedOnlyExclusions(
-        scope,
-        options.manifest !== undefined ? options.manifest : readManifest(),
-      )
-    : []
+  const effectivePattern = normalizeFilePattern(sandbox.basePath, scope, filePattern)
 
   // A plain identifier can only hit inside a single token, so the FTS vocab
   // yields a candidate-file superset that scanCandidates filters exactly.
@@ -69,9 +83,9 @@ export async function searchSourceImpl(
     ? findFilesContainingFragment(db, query)
     : null
   if (candidates) {
-    return scanCandidates(sandbox, candidates, query, caseSensitive, filePattern, paths, exclusions)
+    return scanCandidates(sandbox, candidates, query, caseSensitive, effectivePattern, paths, exclusions)
   }
-  return runRg(sandbox, query, caseSensitive, filePattern, paths, exclusions)
+  return runRg(sandbox, query, caseSensitive, effectivePattern, paths, exclusions)
 }
 
 /** Full rg scan for regex queries. Same result shape as scanCandidates. */
@@ -99,8 +113,9 @@ async function runRg(
   args.push('-e', query)
   args.push(...paths)
 
+  const exclusionFlag = process.platform === 'win32' ? '--iglob' : '-g'
   for (const glob of exclusions) {
-    args.push('-g', glob)
+    args.push(exclusionFlag, glob)
   }
 
   const rgProcess = spawn({
@@ -165,7 +180,8 @@ async function scanCandidates(
   paths: string[],
   exclusions: string[],
 ) {
-  const scopeRoots = paths.includes('.') ? null : paths
+  const pathKey = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path
+  const scopeRoots = paths.includes('.') ? null : paths.map(pathKey)
   // a pattern without '/' matches against the basename only (rg -g semantics);
   // an anchored one matches the whole sandbox-relative path
   const basenameGlob =
@@ -176,7 +192,7 @@ async function scanCandidates(
     filePattern !== undefined && filePattern.includes('/')
       ? new Glob(filePattern)
       : undefined
-  const exclusionGlobs = exclusions.map(glob => new Glob(glob.slice(1)))
+  const exclusionGlobs = exclusions.map(glob => new Glob(pathKey(glob.slice(1))))
   const regex = new RegExp(query, caseSensitive ? '' : 'i')
 
   let output = ''
@@ -184,10 +200,11 @@ async function scanCandidates(
   let truncated = false
 
   for (const path of candidates) {
-    if (scopeRoots && !scopeRoots.some(root => path.startsWith(`${root}/`))) continue
+    const candidate = pathKey(path)
+    if (scopeRoots && !scopeRoots.some(root => candidate === root || candidate.startsWith(`${root}/`))) continue
     if (basenameGlob && !basenameGlob.match(basename(path))) continue
     if (pathGlob && !pathGlob.match(path)) continue
-    if (exclusionGlobs.some(glob => glob.match(path))) continue
+    if (exclusionGlobs.some(glob => glob.match(candidate))) continue
 
     const text = await Bun.file(join(sandbox.basePath, path)).text()
     const hits: string[] = []
@@ -216,6 +233,7 @@ async function scanCandidates(
 
 interface ScopeResolution {
   paths?: string[]
+  exclusions?: string[]
   guidance?: string
 }
 
@@ -226,7 +244,7 @@ interface ScopeResolution {
  */
 function resolveScopePaths(sandboxRoot: string, scope: SearchScope): ScopeResolution {
   if (scope === 'all') return { paths: ['.'] }
-  if (scope === 'vanilla') return { paths: ['Defs', 'Source'] }
+  if (scope === 'vanilla') return { paths: ['Defs', 'Patches', 'Source'] }
 
   const modsRoot = join(sandboxRoot, 'Mods')
   if (scope === 'mods') {
@@ -240,42 +258,51 @@ function resolveScopePaths(sandboxRoot: string, scope: SearchScope): ScopeResolu
     return {
       guidance:
         `Unknown scope "${scope}". ` +
-        `Valid: 'all' (default), 'vanilla' (Defs + Source), 'mods', or a packageId ` +
+        `Valid: 'all' (default), 'vanilla' (Defs + Patches + Source), 'mods', or a packageId ` +
         `(e.g. 'ancot.kiirorace') — list them with list_mods.`,
     }
   }
   return { paths: [dir] }
 }
 
-/**
- * Exclusion globs for loaded_only=true: non-selected version folders and
- * shadowed files stay searchable in loaded_only=false mode only.
- */
-function resolveLoadedOnlyExclusions(
-  scope: SearchScope,
-  manifest: ModsManifest | null,
-): string[] {
-  if (!manifest) return []
-
-  const mods: ManifestMod[] = manifest.mods.filter(
-    mod =>
-      mod.assetPath !== '' &&
-      (scope === 'all' || scope === 'mods' || mod.packageId === scope.toLowerCase()),
-  )
-
-  const globs: string[] = []
-  for (const mod of mods) {
-    const selected = new Set(mod.activeFolders)
-    for (const folder of [...mod.versionDirs, 'Common']) {
-      if (!selected.has(folder)) {
-        globs.push(`!${mod.assetPath}/${folder}/**`)
+function loadedScope(sandboxRoot: string, scope: SearchScope, manifest: ModsManifest): ScopeResolution {
+  if (scope !== 'all' && scope !== 'vanilla' && scope !== 'mods') {
+    const id = scope.toLowerCase()
+    const inProfileMod = manifest.mods.find(mod => mod.inProfile && mod.assetPath && mod.packageId === id)
+    if (!inProfileMod) {
+      const knownInactive =
+        manifest.mods.some(mod => !mod.inProfile && mod.packageId === id) ||
+        manifest.discoveredNotInProfile.some(mod => mod.packageId === id) ||
+        existsSync(join(sandboxRoot, 'Mods', escapePackageDirName(scope)))
+      if (knownInactive) {
+        return {
+          guidance: `Mod "${scope}" is not in the active profile; use loaded_only=false to search non-loaded files.`,
+        }
       }
     }
-    for (const file of mod.shadowedFiles) {
-      globs.push(`!${mod.assetPath}/${file}`)
-    }
   }
-  return globs
+  const base = resolveScopePaths(sandboxRoot, scope)
+  if (base.guidance !== undefined) return base
+
+  const roots = new Set<string>()
+  const exclusions: string[] = []
+  if (scope === 'all' || scope === 'vanilla') {
+    for (const dir of ['Defs', 'Patches', 'Source']) roots.add(dir)
+  }
+  for (const mod of manifest.mods) {
+    if (!mod.inProfile || !mod.assetPath) continue
+    if (scope !== 'all' && scope !== 'mods' && mod.packageId !== scope.toLowerCase()) continue
+    for (const dir of ['About', 'Source', 'Source-decompiled']) {
+      roots.add(posix.join(mod.assetPath, dir))
+    }
+    for (const folder of mod.activeFolders) {
+      for (const dir of ['Defs', 'Patches', 'Languages', 'Source', 'Assemblies']) {
+        roots.add(posix.join(mod.assetPath, folder, dir))
+      }
+    }
+    for (const file of mod.shadowedFiles) exclusions.push('!' + mod.assetPath + '/' + file)
+  }
+  return { paths: [...roots], exclusions }
 }
 
 export async function searchSource(
@@ -296,7 +323,7 @@ export async function searchSource(
   )
 
   if (guidance) {
-    return textResponse(guidance)
+    return textResponse(guidance, true)
   }
 
   // rg prefixes heading lines with './' when the scope searches '.', and

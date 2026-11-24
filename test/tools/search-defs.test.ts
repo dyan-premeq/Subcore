@@ -179,4 +179,14 @@ describe('search-defs', () => {
       `defType is the literal XML tag (e.g. 'AlienRace.ThingDef_AlienRace'); for an exact name try find_refs.`,
     )
   })
+
+  test('omitting query enumerates defs filtered by defType and/or mod', () => {
+    const byMod = searchDefs(db, undefined, undefined, 'mehni.pickupandhaul', 10)
+    expect(byMod.structuredContent.total).toBe(1)
+    expect(byMod.structuredContent.results[0]!.defName).toBe('TestGun')
+
+    const byType = searchDefs(db, undefined, 'JobDef', undefined, 10)
+    expect(byType.structuredContent.total).toBe(1)
+    expect(byType.structuredContent.results[0]!.defName).toBe('TestGunJob')
+  })
 })

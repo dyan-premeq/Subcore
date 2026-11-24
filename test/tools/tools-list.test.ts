@@ -72,11 +72,15 @@ describe('tools/list over stdio', () => {
         const tools = response.result!.tools as Array<{
           name: string
           title?: unknown
+          inputSchema?: { required?: string[] }
           annotations?: { readOnlyHint?: unknown; openWorldHint?: unknown }
           outputSchema?: { type?: unknown }
         }>
 
         expect(tools.map(t => t.name)).toEqual(EXPECTED_TOOLS)
+
+        const searchDefsTool = tools.find(t => t.name === 'search_defs')!
+        expect(searchDefsTool.inputSchema?.required ?? []).not.toContain('query')
 
         for (const tool of tools) {
           expect(tool.annotations!.readOnlyHint).toBe(true)
