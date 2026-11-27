@@ -22,6 +22,13 @@ export function replaceMods(db: Database, rows: ModInsertRow[]): void {
       $packageId, $name, $source, $assetPath, $loadOrder, $inProfile,
       $activeFolders, $warnings, $dataCategory
     )
+    ON CONFLICT(packageId) DO UPDATE SET
+      name=excluded.name, source=excluded.source, assetPath=excluded.assetPath,
+      loadOrder=excluded.loadOrder, inProfile=excluded.inProfile,
+      activeFolders=excluded.activeFolders, warnings=excluded.warnings, dataCategory=excluded.dataCategory
+    WHERE (name,source,assetPath,loadOrder,inProfile,activeFolders,warnings,dataCategory)
+      IS NOT (excluded.name,excluded.source,excluded.assetPath,excluded.loadOrder,excluded.inProfile,
+              excluded.activeFolders,excluded.warnings,excluded.dataCategory)
   `)
 
   db.transaction((all: ModInsertRow[]) => {

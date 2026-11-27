@@ -110,10 +110,15 @@ export interface ManifestMod extends ModInfo {
   /** files shadowed by a higher-priority load folder (kept for reference) */
   shadowedFiles: string[]
   issues: LoadOrderIssue[]
+  /** Present on assets produced by sync. */
+  fingerprint?: string
+  assemblyHashes?: Record<string, string>
+  decompileWarnings?: string[]
 }
 
 export interface ModsManifest {
   generatedAt: string
+  gameRoot?: string
   gameVersion: string
   profile: Profile
   /** in-profile mods, ordered by loadOrder (base first) */

@@ -1,61 +1,63 @@
 import { file, Glob } from 'bun'
-import { Database } from 'bun:sqlite'
-import { join } from 'node:path'
+import type { Database } from 'bun:sqlite'
+import { join, posix } from 'node:path'
 import { assetsPath, indexDbPath } from '../utils/env'
-import { ensureSchema } from '../db/schema'
+import { withIndexWriter } from '../db/writer'
 
-/**
- * Rebuilds source_files + source_fts from every text file under assetsRoot.
- * Returns the file count.
- */
-export async function indexSourceFiles(db: Database, assetsRoot: string): Promise<number> {
-  db.run('DELETE FROM source_files')
-  // contentless FTS5 tables are only cleared via this command
-  db.run("INSERT INTO source_fts(source_fts) VALUES('delete-all')")
-
-  const insertFile = db.prepare('INSERT INTO source_files (id, path) VALUES ($id, $path)')
-  const insertFts = db.prepare('INSERT INTO source_fts (rowid, body) VALUES ($id, $body)')
-
-  // Manual BEGIN/COMMIT: db.transaction() cannot wrap an async file loop, and
-  // buffering the whole tree (hundreds of MB) before writing is not an option.
-  let id = 0
-  db.run('BEGIN')
-  for await (const entry of new Glob('**/*').scan({
-    cwd: assetsRoot,
-    onlyFiles: true,
-  })) {
-    const relativePath = entry.replaceAll('\\', '/')
-    // A partial index is invalid, so source read errors must abort the rebuild
-    // (the open transaction is discarded with the connection).
-    const buffer = await file(join(assetsRoot, relativePath)).arrayBuffer()
-    // rg's binary criterion: a NUL byte within the first 8KB marks a binary file.
-    if (new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 8192)).includes(0)) continue
-    id += 1
-    insertFile.run({ $id: id, $path: relativePath })
-    insertFts.run({ $id: id, $body: new TextDecoder().decode(buffer) })
-  }
-  db.run('COMMIT')
-
-  return id
+export interface AssetDirectory {
+  /** Posix path relative to the published asset tree. */
+  prefix: string
+  /** A staged replacement, or the currently published directory. */
+  dir: string
 }
 
-export async function rebuildSourceIndex(
-  dbPath = indexDbPath,
-  assetsRoot = assetsPath,
-): Promise<void> {
-  console.log(`Scanning all text files in: ${assetsRoot}`)
-
-  const db = new Database(dbPath)
-
+/** An absent directory in a partial update has only its old FTS rows removed. */
+export async function indexSourceFiles(
+  db: Database, assetsRoot: string, directories?: AssetDirectory[], removed: string[] = [], clearAll = !directories,
+): Promise<number> {
+  const ownsTransaction = !db.inTransaction
+  if (ownsTransaction) db.run('BEGIN IMMEDIATE')
   try {
-    ensureSchema(db)
-    const fileCount = await indexSourceFiles(db, assetsRoot)
-    console.log(`Indexed ${fileCount} text files into source_fts.`)
-  } finally {
-    db.close()
+    if (!clearAll && directories) {
+      const deleteFts = db.prepare('DELETE FROM source_fts WHERE rowid IN (SELECT id FROM source_files WHERE path GLOB ?)')
+      const deleteFiles = db.prepare('DELETE FROM source_files WHERE path GLOB ?')
+      for (const prefix of [...directories.map(d => d.prefix), ...removed]) {
+        // Imported package directory names contain only letters, digits, dots and underscores.
+        deleteFts.run(prefix + '/*')
+        deleteFiles.run(prefix + '/*')
+      }
+    } else {
+      db.run("INSERT INTO source_fts(source_fts) VALUES('delete-all')")
+      db.run('DELETE FROM source_files')
+    }
+
+    const insertFile = db.prepare('INSERT INTO source_files (path) VALUES (?)')
+    const insertFts = db.prepare('INSERT INTO source_fts (rowid, body) VALUES (?, ?)')
+    const decoder = new TextDecoder()
+    let count = 0
+    for (const { dir, prefix } of directories ?? [{ dir: assetsRoot, prefix: '' }]) {
+      for await (const entry of new Glob('**/*').scan({ cwd: dir, onlyFiles: true })) {
+        const buffer = await file(join(dir, entry)).arrayBuffer()
+        // Same binary criterion as rg.
+        if (new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 8192)).includes(0)) continue
+        const { lastInsertRowid } = insertFile.run(posix.join(prefix, entry.replaceAll('\\', '/')))
+        insertFts.run(lastInsertRowid, decoder.decode(buffer))
+        count++
+      }
+    }
+    if (ownsTransaction) db.run('COMMIT')
+    return count
+  } catch (error) {
+    if (ownsTransaction) db.run('ROLLBACK')
+    throw error
   }
 }
 
-if (import.meta.main) {
-  await rebuildSourceIndex()
+export async function rebuildSourceIndex(dbPath = indexDbPath, assetsRoot = assetsPath): Promise<void> {
+  await withIndexWriter(dbPath, async db => {
+    const count = await indexSourceFiles(db, assetsRoot)
+    console.error(`Indexed ${count} text files into source_fts.`)
+  })
 }
+
+if (import.meta.main) await rebuildSourceIndex()

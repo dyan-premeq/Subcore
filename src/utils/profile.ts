@@ -102,17 +102,21 @@ export function checkProfileGameVersion(
  * source only — the dev-time load order always comes from the profile.
  */
 export function parseModsConfig(xml: string): string[] {
+  return activeModsFromXml(xml) ?? []
+}
+
+function activeModsFromXml(xml: string): string[] | null {
   let parsed: unknown
   try {
-    parsed = parser.parse(xml)
+    parsed = parser.parse(xml, true)
   } catch {
-    return []
+    return null
   }
   const root = parsed as Record<string, unknown>
   // game writes <ModsConfigData><activeMods>…; accept <data> too
   const data = (root.data ?? root.ModsConfigData ?? root) as Record<string, unknown>
   const activeMods = data.activeMods as { li?: unknown } | undefined
-  if (!activeMods) return []
+  if (activeMods === undefined) return null
   const li = activeMods.li
   const items = li === undefined ? [] : Array.isArray(li) ? li : [li]
   return items.map(v => normalizePackageId(String(v))).filter(v => v !== '')
@@ -122,12 +126,15 @@ export function parseModsConfig(xml: string): string[] {
  * Snapshots the player's active mod list into a profile draft: original order
  * preserved (autoOrder=false), vanilla base stripped from mods.
  */
-export function profileFromModsConfig(activePackageIds: string[], name = 'from-game-config'): Profile {
+export function profileFromModsConfig(activePackageIds: string[], name = 'from-game-config', installedBase?: string[]): Profile {
   const vanilla = new Set<string>(PRODUCT_PACKAGE_IDS)
+  const active = activePackageIds.map(normalizePackageId)
+  const partialBase = installedBase?.some(id => vanilla.has(id) && !active.includes(id) && id !== PRODUCT_PACKAGE_IDS[0])
+  const dlcs = partialBase ? PRODUCT_PACKAGE_IDS.slice(1).filter(id => active.includes(id)) : []
   return {
     name,
-    base: 'all-dlc',
-    mods: activePackageIds.map(normalizePackageId).filter(id => !vanilla.has(id)),
+    base: partialBase ? 'core-only' : 'all-dlc',
+    mods: [...dlcs, ...active.filter(id => !vanilla.has(id))],
     autoOrder: false,
   }
 }
@@ -170,7 +177,7 @@ export function readPlayerActiveMods(modsConfigPath?: string): string[] | null {
   const path = modsConfigPath ?? discoverModsConfigPath()
   if (!path || !existsSync(path)) return null
   try {
-    return parseModsConfig(readFileSync(path, 'utf8'))
+    return activeModsFromXml(readFileSync(path, 'utf8'))
   } catch {
     return null
   }

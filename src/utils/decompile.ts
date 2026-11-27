@@ -74,7 +74,7 @@ export function decompileAssemblies(
     }
 
     const result = spawnSync({
-      cmd: [ilspyCmd, ...references, '-o', outDir, distDll],
+      cmd: [ilspyCmd, ...references, '-o', outDir, distDll, '--disable-updatecheck'],
       stdout: 'ignore',
       stderr: 'pipe',
     })

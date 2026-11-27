@@ -16,6 +16,7 @@
   "scripts": {
     "start": "bun src/stdio.ts",
     "start:http": "bun src/http.ts",
+    "sync": "bun src/scripts/sync.ts",
     "clean": "bun src/scripts/clean-db.ts",
     "index:defs": "bun src/scripts/index-defs.ts",
     "index:csharp": "bun src/scripts/index-csharp.ts",

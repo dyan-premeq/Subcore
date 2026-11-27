@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import type { ModsManifest } from '../types'
 import { indexDbPath, defsPath, versionPath, modsManifestPath } from '../utils/env'
-import { ensureSchema, SCHEMA_VERSION } from '../db/schema'
+import { SCHEMA_VERSION } from '../db/schema'
+import { withIndexWriter } from '../db/writer'
 import { replaceMods, type ModInsertRow } from '../repositories/mods-repo'
 import { setMeta } from '../repositories/meta-repo'
 import { readManifest } from '../utils/manifest'
@@ -30,12 +31,8 @@ export async function rebuildModsIndex(
   const manifest = readManifest(manifestPath)
   const gameVersion = readGameVersion(manifest, distVersionPath)
 
-  const db = new Database(dbPath)
-  try {
-    ensureSchema(db)
-    db.run('DELETE FROM mods')
-    // patched_defs.changedBy holds modIds from the old mods table — drop it
-    // rather than serve stale payloads (patched view falls back to merged)
+  await withIndexWriter(dbPath, async db => {
+    // Standalone index:mods can change active conditions or load order.
     db.run('DELETE FROM patched_defs')
 
     if (manifest) {
@@ -53,12 +50,10 @@ export async function rebuildModsIndex(
       db.query('SELECT COUNT(*) AS n FROM mods').get() as { n: number }
     ).n
     console.log(`Indexed ${count} mods (schema v${SCHEMA_VERSION}).`)
-  } finally {
-    db.close()
-  }
+  })
 }
 
-function insertFromManifest(db: Database, manifest: ModsManifest): void {
+export function insertFromManifest(db: Database, manifest: ModsManifest): void {
   const rows = manifest.mods.map(mod => ({
     packageId: mod.packageId,
     name: mod.name,
@@ -85,7 +80,15 @@ function insertFromManifest(db: Database, manifest: ModsManifest): void {
     })
   }
 
+  reconcileMods(db, rows)
+}
+
+function reconcileMods(db: Database, rows: ModInsertRow[]): void {
   replaceMods(db, rows)
+  const keep = new Set(rows.map(row => row.packageId))
+  for (const { packageId } of db.query<{ packageId: string }, []>('SELECT packageId FROM mods').all()) {
+    if (!keep.has(packageId)) db.query('DELETE FROM mods WHERE packageId = ?').run(packageId)
+  }
 }
 
 function listCategories(defsSourcePath: string): string[] {
@@ -133,7 +136,7 @@ function synthesizeVanillaBaseMods(
     }
   }
 
-  replaceMods(db, rows)
+  reconcileMods(db, rows)
 }
 
 /**

@@ -17,6 +17,7 @@ const EXPECTED_TOOLS = [
   'search_patches',
   'search_harmony',
   'find_refs',
+  'sync_profile',
 ]
 
 const TOOLS_WITH_OUTPUT_SCHEMA = new Set([
@@ -27,11 +28,12 @@ const TOOLS_WITH_OUTPUT_SCHEMA = new Set([
   'search_patches',
   'search_harmony',
   'find_refs',
+  'sync_profile',
 ])
 
 describe('tools/list over stdio', () => {
   test(
-    'registers the ten read-only tools in order with titles and output schemas',
+    'registers the query tools and explicit sync with their effects and output schemas',
     async () => {
       const proc = Bun.spawn(['bun', 'src/stdio.ts'], {
         stdin: 'pipe',
@@ -73,7 +75,7 @@ describe('tools/list over stdio', () => {
           name: string
           title?: unknown
           inputSchema?: { required?: string[] }
-          annotations?: { readOnlyHint?: unknown; openWorldHint?: unknown }
+          annotations?: { readOnlyHint?: unknown; idempotentHint?: unknown; openWorldHint?: unknown }
           outputSchema?: { type?: unknown }
         }>
 
@@ -83,7 +85,8 @@ describe('tools/list over stdio', () => {
         expect(searchDefsTool.inputSchema?.required ?? []).not.toContain('query')
 
         for (const tool of tools) {
-          expect(tool.annotations!.readOnlyHint).toBe(true)
+          expect(tool.annotations!.readOnlyHint).toBe(tool.name !== 'sync_profile')
+          if (tool.name === 'sync_profile') expect(tool.annotations!.idempotentHint).toBe(true)
           expect(tool.annotations!.openWorldHint).toBe(false)
           expect(typeof tool.title).toBe('string')
           expect(tool.title).not.toBe('')

@@ -2,10 +2,11 @@ import { Glob, spawnSync } from 'bun'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { distPath, gameRootFromEnv } from '../utils/env'
+import { importedGameRoot, markStandaloneImport } from '../utils/manifest'
 import { findIlspycmd, stripIlComments } from '../utils/decompile'
 import { listXmlFiles } from '../utils/load-folders'
 
-const VANILLA_ASSEMBLIES = ['Assembly-CSharp', 'UnityStubs', 'RimWorldWaylith.PrepatcherCompat']
+export const VANILLA_ASSEMBLIES = ['Assembly-CSharp', 'UnityStubs', 'RimWorldWaylith.PrepatcherCompat']
 
 interface ImportVanillaOptions {
   gameRoot: string
@@ -20,9 +21,16 @@ export function importVanilla({
   const versionFile = join(gameRoot, 'Version.txt')
   if (!existsSync(versionFile)) throw new Error('Missing Version.txt in ' + gameRoot)
 
+  markStandaloneImport(distRoot, gameRoot)
+  const assets = join(distRoot, 'assets')
+  importVanillaXml(gameRoot, assets)
+  copyFileSync(versionFile, join(distRoot, 'Version.txt'))
+  importVanillaSource(gameRoot, assets, full, ilspyCmd)
+}
+
+export function importVanillaXml(gameRoot: string, assets: string): void {
   const data = join(gameRoot, 'Data')
   const categories = existsSync(data) ? readdirSync(data, { withFileTypes: true }) : []
-  const assets = join(distRoot, 'assets')
   for (const kind of ['Defs', 'Patches']) {
     const out = join(assets, kind)
     rmSync(out, { recursive: true, force: true })
@@ -37,8 +45,9 @@ export function importVanilla({
       }
     }
   }
-  copyFileSync(versionFile, join(distRoot, 'Version.txt'))
+}
 
+export function importVanillaSource(gameRoot: string, assets: string, full: boolean, ilspyCmd: string | null): void {
   const source = join(assets, 'Source')
   mkdirSync(source, { recursive: true })
   const targets = VANILLA_ASSEMBLIES.filter(name => existsSync(join(gameRoot, name + '.dll')))
@@ -56,8 +65,8 @@ export function importVanilla({
     rmSync(out, { recursive: true, force: true })
     rmSync(tmp, { recursive: true, force: true })
     try {
-      console.log('Decompiling ' + name)
-      const result = spawnSync([ilspyCmd, '-p', '-r', gameRoot, '-o', tmp, dll])
+      console.error('Decompiling ' + name)
+      const result = spawnSync([ilspyCmd, '-p', '-r', gameRoot, '-o', tmp, dll, '--disable-updatecheck'])
       if (result.exitCode !== 0) throw new Error(name + ': ' + result.stderr.toString())
       for (const path of new Glob('**/*.csproj').scanSync({ cwd: tmp, absolute: true, dot: true })) rmSync(path)
       for (const path of new Glob('**/*.cs').scanSync({ cwd: tmp, absolute: true, dot: true })) stripIlComments(path)
@@ -72,9 +81,9 @@ export function importVanilla({
 if (import.meta.main) {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: bun run import:vanilla [gameRoot] [--full]\ngameRoot defaults to RIMSAGE_GAME_ROOT.')
+    console.log('Usage: bun run import:vanilla [gameRoot] [--full]\ngameRoot defaults to RIMSAGE_GAME_ROOT or the last imported installation.')
   } else {
-    const gameRoot = args.find(arg => !arg.startsWith('-')) ?? gameRootFromEnv()
+    const gameRoot = args.find(arg => !arg.startsWith('-')) ?? gameRootFromEnv() ?? importedGameRoot()
     if (!gameRoot) throw new Error('Pass the game root or set RIMSAGE_GAME_ROOT.')
     importVanilla({ gameRoot, full: args.includes('--full') })
   }

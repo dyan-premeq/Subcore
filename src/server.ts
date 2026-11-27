@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { PathSandbox } from './utils/path-sandbox'
-import { db } from './utils/db'
+import { readDb } from './utils/db'
 import { assetsPath } from './utils/env'
 import { searchSource } from './tools/search-source'
 import { readFile } from './tools/read-file'
@@ -19,7 +19,7 @@ const name = 'rimsage'
 const version = pkg.version
 const sandbox = new PathSandbox('dist/assets')
 
-const instructions = `Subcore indexes a local RimWorld install plus a dev profile of mods. Read-only.
+const instructions = `Subcore indexes a local RimWorld install plus a dev profile of mods. Queries read the last published index.
 
 Routing:
 - Know the defName -> get_def_details (view=patched for what the game actually
@@ -39,7 +39,8 @@ Routing:
 - "Who hooks this C# method?" -> search_harmony (Harmony patches)
 - Any other XML/C# text -> search_source (regex, slow, last resort)
 - What is in the profile -> list_mods (overview; detail:true + page for per-mod folders/assets/warnings)
-- structuredContent: search_defs/search_patches/search_harmony/find_refs/list_mods/list_directory/get_def_details return it; search_source/read_file/read_csharp_symbol are text-only.
+- Refresh the index on explicit request -> sync_profile. Set fromGameConfig only when asked to replace the profile with the player mod list.
+- structuredContent: sync_profile/search_defs/search_patches/search_harmony/find_refs/list_mods/list_directory/get_def_details return it; search_source/read_file/read_csharp_symbol are text-only.
 
 Verification & data boundaries:
 - Never guess runtime mechanics from XML tag or field names alone (e.g.
@@ -107,7 +108,7 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ query, file_pattern, case_sensitive, scope, loaded_only, limit }) =>
-      searchSource(db, sandbox, query, case_sensitive, file_pattern, {
+      searchSource(readDb(), sandbox, query, case_sensitive, file_pattern, {
         scope,
         loadedOnly: loaded_only,
         limit,
@@ -210,7 +211,7 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ defName, defType, view, mod, dup }) =>
-      getDefDetails(db, defName, defType, { view, mod, dup }),
+      getDefDetails(readDb(), defName, defType, { view, mod, dup }),
   )
 
   // tool: search defs
@@ -253,7 +254,7 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ query, defType, mod, limit, dup }) =>
-      searchDefs(db, query, defType, mod, limit, dup),
+      searchDefs(readDb(), query, defType, mod, limit, dup),
   )
 
   // tool: read csharp symbol
@@ -285,7 +286,7 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ symbol, memberName, file_path }) =>
-      readCsharpSymbol(db, assetsPath, symbol, memberName, file_path),
+      readCsharpSymbol(readDb(), assetsPath, symbol, memberName, file_path),
   )
 
   // tool: list mods
@@ -318,7 +319,7 @@ function registerTools(server: McpServer) {
       outputSchema: listModsOutputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ detail, page, packageId }) => listMods(db, { detail, page, packageId }),
+    ({ detail, page, packageId }) => listMods(readDb(), { detail, page, packageId }),
   )
 
   // tool: search patches
@@ -357,7 +358,7 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ defName, packageId, opClass, limit }) =>
-      searchPatches(db, { defName, packageId, opClass, limit }),
+      searchPatches(readDb(), { defName, packageId, opClass, limit }),
   )
 
   // tool: search harmony patches
@@ -392,7 +393,7 @@ function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ targetType, targetMethod, mod, limit }) =>
-      searchHarmony(db, {
+      searchHarmony(readDb(), {
         targetType,
         targetMethod,
         packageId: mod,
@@ -418,6 +419,31 @@ function registerTools(server: McpServer) {
       outputSchema: findRefsOutputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ name }) => findRefs(db, sandbox, name),
+    ({ name }) => findRefs(readDb(), sandbox, name),
+  )
+
+  server.registerTool(
+    'sync_profile',
+    {
+      title: 'Sync the mod profile',
+      description: 'Refresh imported assets and the index for the configured development profile. Use when asked to sync after changing mods, load order, or source files.',
+      inputSchema: z.strictObject({
+        gameRoot: z.string().min(1).optional().describe('Local RimWorld installation. Defaults to RIMSAGE_GAME_ROOT or the previously imported installation.'),
+        fromGameConfig: z.boolean().default(false).describe('Replace the development profile with a snapshot of the player ModsConfig.xml before syncing.'),
+        full: z.boolean().default(false).describe('Reimport and rebuild all layers even when the inputs are unchanged.'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      outputSchema: z.object({
+        status: z.enum(['up-to-date', 'synced']), mode: z.enum(['unchanged', 'incremental', 'full']),
+        gameVersion: z.string(), activeMods: z.number().int(),
+        changedMods: z.array(z.string()), removedMods: z.array(z.string()),
+        xmlRebuilt: z.boolean(), elapsedMs: z.number(),
+      }),
+    },
+    async options => {
+      const { syncProfile } = await import('./sync/profile')
+      const result = await syncProfile(options)
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: { ...result } }
+    },
   )
 }

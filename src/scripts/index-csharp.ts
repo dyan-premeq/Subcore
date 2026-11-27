@@ -1,9 +1,10 @@
 import { CSHARP_TYPE_DECLARATION } from '../utils/csharp-type'
 import { file, Glob } from 'bun'
-import { Database } from 'bun:sqlite'
-import { join } from 'node:path'
+import type { Database } from 'bun:sqlite'
+import { join, posix } from 'node:path'
 import { assetsPath, indexDbPath } from '../utils/env'
-import { ensureSchema } from '../db/schema'
+import { withIndexWriter } from '../db/writer'
+import type { AssetDirectory } from './index-source'
 import { replaceCsharpIndex, type CsharpInsertRow } from '../repositories/csharp-repo'
 import { replaceHarmonyPatches, type HarmonyInsertRow } from '../repositories/harmony-repo'
 import { extractHarmonyPatches } from '../utils/harmony-parse'
@@ -25,66 +26,72 @@ export async function rebuildCsharpIndex(
   dbPath = indexDbPath,
   assetsRoot = assetsPath,
 ) {
-  console.log(`Scanning C# source in: ${assetsRoot}`)
+  return withIndexWriter(dbPath, db => indexCsharp(db, assetsRoot))
+}
 
-  const db = new Database(dbPath)
-
-  try {
-    ensureSchema(db)
-
-    const modIdByDir = loadModIdByDir(db)
-
+export async function indexCsharp(
+  db: Database, assetsRoot: string, directories?: AssetDirectory[], changedIds: (number | null)[] = [], clearAll = !directories,
+) {
+  const modIdByDir = loadModIdByDir(db)
+  if (!clearAll) {
+    for (const id of changedIds) {
+      db.query('DELETE FROM csharp_index WHERE modId IS ?').run(id)
+      db.query('DELETE FROM harmony_patches WHERE modId IS ?').run(id)
+    }
+  } else {
     db.run('DELETE FROM csharp_index')
     db.run('DELETE FROM harmony_patches')
-
-    let fileCount = 0
-    let typeCount = 0
-    const typeRows: CsharpInsertRow[] = []
-    const harmonyRows: HarmonyInsertRow[] = []
-
-    for (const pattern of SCAN_PATTERNS) {
-      for await (const entry of new Glob(pattern).scan({
-        cwd: assetsRoot,
-        onlyFiles: true,
-      })) {
-        const relativePath = entry.replaceAll('\\', '/')
-        const modId = modIdForPath(relativePath, modIdByDir)
-        fileCount += 1
-
-        // A partial index is invalid, so source read errors must abort the rebuild.
-        const content = await file(join(assetsRoot, relativePath)).text()
-
-        const patches = extractHarmonyPatches(content)
-        for (const patch of patches) {
-          harmonyRows.push({ ...patch, modId, filePath: relativePath })
-        }
-
-        const lines = content.split(/\r?\n/)
-        lines.forEach((line, index) => {
-          const match = line.match(CSHARP_TYPE_DECLARATION)
-          if (match) {
-            typeRows.push({
-              typeName: match[1],
-              filePath: relativePath,
-              startLine: index, // 0-indexed
-              modId,
-            })
-            typeCount++
-          }
-        })
-      }
-    }
-
-    console.log(
-      `Found ${fileCount} files / ${typeCount} types / ${harmonyRows.length} harmony patches. Writing to DB...`,
-    )
-
-    replaceCsharpIndex(db, typeRows)
-    replaceHarmonyPatches(db, harmonyRows)
-    console.log(`Indexing complete.`)
-  } finally {
-    db.close()
   }
+
+  let fileCount = 0
+  let typeCount = 0
+  const typeRows: CsharpInsertRow[] = []
+  const harmonyRows: HarmonyInsertRow[] = []
+
+  const scans = directories
+    ? directories.flatMap(({ dir, prefix }) => (prefix === 'Source' ? ['**/*.cs'] : ['Source/**/*.cs', 'Source-decompiled/**/*.cs'])
+        .map(pattern => ({ dir, prefix, pattern })))
+    : SCAN_PATTERNS.map(pattern => ({ dir: assetsRoot, prefix: '', pattern }))
+  for (const { dir, prefix, pattern } of scans) {
+    for await (const entry of new Glob(pattern).scan({
+      cwd: dir,
+      onlyFiles: true,
+    })) {
+      const relativePath = posix.join(prefix, entry.replaceAll('\\', '/'))
+      const modId = modIdForPath(relativePath, modIdByDir)
+      fileCount += 1
+
+      // A partial index is invalid, so source read errors must abort the rebuild.
+      const content = await file(join(dir, entry)).text()
+
+      const patches = extractHarmonyPatches(content)
+      for (const patch of patches) {
+        harmonyRows.push({ ...patch, modId, filePath: relativePath })
+      }
+
+      const lines = content.split(/\r?\n/)
+      lines.forEach((line, index) => {
+        const match = line.match(CSHARP_TYPE_DECLARATION)
+        if (match) {
+          typeRows.push({
+            typeName: match[1],
+            filePath: relativePath,
+            startLine: index, // 0-indexed
+            modId,
+          })
+          typeCount++
+        }
+      })
+    }
+  }
+
+  console.error(
+    `Found ${fileCount} files / ${typeCount} types / ${harmonyRows.length} harmony patches. Writing to DB...`,
+  )
+
+  replaceCsharpIndex(db, typeRows)
+  replaceHarmonyPatches(db, harmonyRows)
+  console.error(`Indexing complete.`)
 }
 
 /** Mods/<dir> → modId from the mods table (community mods only). */

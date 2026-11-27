@@ -40,6 +40,7 @@ export interface DiscoverModsOptions {
   gameRoot: string
   workshopRoot?: string
   localModsRoot?: string
+  observe?: (path: string) => void
   /** current game version ("1.6.4871"); enables version warnings when given */
   gameVersion?: string
 }
@@ -50,10 +51,28 @@ export interface DiscoverModsOptions {
  * happens separately (profile.ts + load-order.ts).
  */
 export function discoverMods(opts: DiscoverModsOptions): ModInfo[] {
+  const mods = discoverBaseMods(opts)
+
+  // 2. Local mods (<gameRoot>/Mods).
+  const localModsRoot = opts.localModsRoot ?? join(opts.gameRoot, 'Mods')
+  mods.push(...discoverDirectory(localModsRoot, 'local', opts.gameVersion, opts.observe))
+
+  // 3. Workshop mods.
+  const workshopRoot = opts.workshopRoot ?? inferWorkshopRoot(opts.gameRoot)
+  if (workshopRoot) {
+    const contentRoot = join(workshopRoot, 'content', '294100')
+    mods.push(...discoverDirectory(contentRoot, 'workshop', opts.gameVersion, opts.observe))
+  }
+
+  return mods
+}
+
+export function discoverBaseMods(opts: DiscoverModsOptions): ModInfo[] {
   const mods: ModInfo[] = []
 
   // 1. Data packages (builtin Core + DLCs), Core first, then Data order.
   const dataDir = join(opts.gameRoot, 'Data')
+  if (existsSync(dataDir)) opts.observe?.(dataDir)
   const categories = existsSync(dataDir)
     ? readdirSync(dataDir, { withFileTypes: true })
         .filter(e => e.isDirectory())
@@ -69,23 +88,12 @@ export function discoverMods(opts: DiscoverModsOptions): ModInfo[] {
       rootPath,
       category === 'Core' ? 'builtin' : 'dlc',
       fallbackPackageId,
-      opts.gameVersion,
+      opts.gameVersion, opts.observe,
     )
     if (info) {
       info.dataCategory = category
       mods.push(info)
     }
-  }
-
-  // 2. Local mods (<gameRoot>/Mods).
-  const localModsRoot = opts.localModsRoot ?? join(opts.gameRoot, 'Mods')
-  mods.push(...discoverDirectory(localModsRoot, 'local', opts.gameVersion))
-
-  // 3. Workshop mods.
-  const workshopRoot = opts.workshopRoot ?? inferWorkshopRoot(opts.gameRoot)
-  if (workshopRoot) {
-    const contentRoot = join(workshopRoot, 'content', '294100')
-    mods.push(...discoverDirectory(contentRoot, 'workshop', opts.gameVersion))
   }
 
   return mods
@@ -94,9 +102,10 @@ export function discoverMods(opts: DiscoverModsOptions): ModInfo[] {
 function discoverDirectory(
   dir: string,
   source: ModSource,
-  gameVersion?: string,
+  gameVersion?: string, observe?: (path: string) => void,
 ): ModInfo[] {
   if (!existsSync(dir)) return []
+  observe?.(dir)
 
   const mods: ModInfo[] = []
   const entries = readdirSync(dir, { withFileTypes: true })
@@ -105,14 +114,14 @@ function discoverDirectory(
     .sort()
 
   for (const name of entries) {
-    const info = readModDir(join(dir, name), source, normalizePackageId(name), gameVersion)
+    const info = readModDir(join(dir, name), source, normalizePackageId(name), gameVersion, observe)
     if (info) mods.push(info)
   }
   return mods
 }
 
 // 1.7 ModMetaData.Init uses GenFile.ResolveCaseInsensitiveFilePath for metadata.
-function resolveMetadataPath(root: string, ...names: string[]): string | undefined {
+function resolveMetadataPath(root: string, observe: ((path: string) => void) | undefined, ...names: string[]): string | undefined {
   let path = root
   for (const name of names) {
     const entries = readdirSync(path, { withFileTypes: true })
@@ -120,6 +129,7 @@ function resolveMetadataPath(root: string, ...names: string[]): string | undefin
       ?? entries.find(e => e.name.toLowerCase() === name.toLowerCase())
     if (!entry || (name === 'About' && !entry.isDirectory())) return undefined
     path = join(path, entry.name)
+    observe?.(path)
   }
   return path
 }
@@ -128,14 +138,15 @@ export function readModDir(
   rootPath: string,
   source: ModSource,
   fallbackPackageId: string,
-  gameVersion?: string,
+  gameVersion?: string, observe?: (path: string) => void,
 ): ModInfo | undefined {
   if (!existsSync(rootPath)) return undefined
 
+  observe?.(rootPath)
   const warnings: string[] = []
   const dirName = basename(rootPath)
 
-  const aboutPath = resolveMetadataPath(rootPath, 'About', 'About.xml')
+  const aboutPath = resolveMetadataPath(rootPath, observe, 'About', 'About.xml')
   let aboutXml: string | undefined
   if (!aboutPath) {
     warnings.push('missing About.xml; using directory name as packageId')
@@ -167,7 +178,7 @@ export function readModDir(
     source,
     rootPath,
     supportedVersions,
-    loadFolders: parseLoadFoldersXmlRaw(rootPath),
+    loadFolders: parseLoadFoldersXmlRaw(rootPath, observe),
     versionDirs: listVersionDirs(rootPath),
     dependencies: parseDependencyList(meta?.modDependencies?.li),
     loadAfter: parseStringList(meta?.loadAfter?.li),
@@ -272,8 +283,8 @@ function applyPerVersionData(
  * Keys are lowercased with a leading 'v' stripped ("v1.6" -> "1.6"), matching
  * ModLoadFolders.LoadDataFromXmlCustom.
  */
-export function parseLoadFoldersXmlRaw(rootPath: string): ModInfo['loadFolders'] {
-  const path = resolveMetadataPath(rootPath, 'LoadFolders.xml')
+export function parseLoadFoldersXmlRaw(rootPath: string, observe?: (path: string) => void): ModInfo['loadFolders'] {
+  const path = resolveMetadataPath(rootPath, observe, 'LoadFolders.xml')
   if (!path) return {}
 
   const result: ModInfo['loadFolders'] = Object.create(null)

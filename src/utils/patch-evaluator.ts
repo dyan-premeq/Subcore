@@ -55,6 +55,7 @@ export interface PatchEvaluatorOptions {
    * (game: ModLister.HasActiveModWithName — exact, case-sensitive).
    */
   activeModNames: ReadonlySet<string>
+  onFindMod?: (names: string[]) => void
 }
 
 // #endregion
@@ -98,11 +99,11 @@ export class PatchEvaluator {
 
   readonly opRecords: PatchOpRecord[] = []
 
-  private readonly activeModNames: ReadonlySet<string>
+  private readonly options: PatchEvaluatorOptions
   private seq = 0
 
   constructor(options: PatchEvaluatorOptions) {
-    this.activeModNames = options.activeModNames
+    this.options = options
     this.doc = this.parser.parseFromString('<Defs/>', 'text/xml')
     this.defsRoot = this.doc.documentElement!
   }
@@ -561,7 +562,8 @@ export class PatchEvaluator {
     const match = childElement(opEl, 'match')
     const nomatch = childElement(opEl, 'nomatch')
 
-    if (names.some(name => this.activeModNames.has(name))) {
+    this.options.onFindMod?.(names)
+    if (names.some(name => this.options.activeModNames.has(name))) {
       if (match) return this.applyOperation(match, record.modId, record.filePath)
       return true
     }

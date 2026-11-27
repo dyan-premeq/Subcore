@@ -1,10 +1,9 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { Glob } from 'bun'
 import type { Database } from 'bun:sqlite'
 import { join, sep } from 'node:path'
 import type { ModsManifest } from '../types'
 import { getModByDataCategory, getModByPackageId } from '../repositories/mods-repo'
-import { escapePackageDirName } from './mod-discovery'
 
 /**
  * A file taking part in defs/patch indexing: absolute path to read plus the
@@ -53,6 +52,7 @@ export async function scanVanillaFiles(
       console.warn(`No mod row for vanilla category "${category}"; skipping ${relativePath}`)
       continue
     }
+    if (!mod.inProfile) continue
     out.push({
       absPath: join(sourcePath, relativePath),
       filePath: toPosix(relativePath),
@@ -61,7 +61,7 @@ export async function scanVanillaFiles(
     })
   }
 
-  console.log(`Vanilla ${kind} files: ${out.length}`)
+  console.error(`Vanilla ${kind} files: ${out.length}`)
   return out
 }
 
@@ -76,27 +76,14 @@ export function scanModFiles(
   modsSourcePath: string,
   manifest: ModsManifest | null,
   kind: 'Defs' | 'Patches',
+  modRoot = (assetPath: string) => join(modsSourcePath, assetPath.slice('Mods/'.length)),
 ): AssetFileRef[] {
-  if (!existsSync(modsSourcePath)) return []
-
   const out: AssetFileRef[] = []
   const kindRe = kind === 'Defs' ? DEFS_RE : PATCHES_RE
-
-  const modDirs = readdirSync(modsSourcePath, { withFileTypes: true })
-    .filter(e => e.isDirectory())
-    .map(e => e.name)
-
-  for (const dirName of modDirs) {
-    const manifestMod = manifest?.mods.find(
-      m => m.assetPath === `Mods/${dirName}` || escapePackageDirName(m.packageId) === dirName,
-    )
-    if (!manifestMod) {
-      console.warn(
-        `[warn] no manifest entry for dist mod dir "${dirName}" (run import-mods); skipping.`,
-      )
-      continue
-    }
-
+  for (const manifestMod of manifest?.mods ?? []) {
+    if (!manifestMod.assetPath) continue
+    const root = modRoot(manifestMod.assetPath)
+    if (!existsSync(root)) continue
     const modRow = getModByPackageId(db, manifestMod.packageId)
     if (!modRow) {
       console.warn(
@@ -113,15 +100,15 @@ export function scanModFiles(
       const posix = toPosix(rel)
       if (!kindRe.test(posix)) continue
       out.push({
-        absPath: join(modsSourcePath, dirName, rel),
-        filePath: `Mods/${dirName}/${posix}`,
+        absPath: join(root, rel),
+        filePath: `${manifestMod.assetPath}/${posix}`,
         modId: modRow.modId,
         loadOrder: modRow.loadOrder,
       })
     }
   }
 
-  console.log(`Mod ${kind} files: ${out.length}`)
+  console.error(`Mod ${kind} files: ${out.length}`)
   return out
 }
 

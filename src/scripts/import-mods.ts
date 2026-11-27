@@ -1,7 +1,8 @@
 import { argv, write } from 'bun'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type {
+  ManifestMod,
   ModInfo,
   ModsManifest,
   Profile,
@@ -12,7 +13,8 @@ import {
   modsManifestPath,
   workshopRootFromEnv,
 } from '../utils/env'
-import { discoverMods, escapePackageDirName, parseVersionTxt } from '../utils/mod-discovery'
+import { importedGameRoot, markStandaloneImport } from '../utils/manifest'
+import { discoverBaseMods, discoverMods, escapePackageDirName, parseVersionTxt } from '../utils/mod-discovery'
 import {
   checkProfileGameVersion,
   loadProfile,
@@ -96,6 +98,7 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
     console.warn(`[load-order] ${issue.kind}: ${issue.packageId} — ${issue.detail}`)
   }
 
+  markStandaloneImport(dirname(manifestPath), gameRoot)
   // copy in-profile community mods
   let copiedFiles = 0
   let skippedFiles = 0
@@ -110,54 +113,24 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
   const manifestMods = []
   for (let index = 0; index < resolved.ordered.length; index++) {
     const mod = resolved.ordered[index]
-    const isCommunity = mod.source === 'local' || mod.source === 'workshop'
-    let assetPath = ''
-    let effectiveFiles: string[] = []
-    let shadowedFiles: string[] = []
-    let activeFolders: string[] = []
-    const decompileWarnings: string[] = []
-
-    if (isCommunity) {
+    const assets = emptyModAssets()
+    if (mod.source === 'local' || mod.source === 'workshop') {
       const dirName = escapePackageDirName(mod.packageId)
-      assetPath = `Mods/${dirName}`
       const destRoot = join(distModsPath, dirName)
-
-      const copyStats = copyModTree(mod, destRoot, full)
-      copiedFiles += copyStats.copied
-      skippedFiles += copyStats.skipped
-
-      activeFolders = selectLoadFolders(mod, gameVersion, profilePackages)
-      const effective = computeEffectiveFiles(mod.rootPath, activeFolders)
-      effectiveFiles = effective.effective
-      shadowedFiles = effective.shadowed
-
-      const assemblies = computeEffectiveAssemblies(mod.rootPath, activeFolders)
-      const stats = decompileAssemblies(ilspyCmd, assemblies, destRoot, full, gameRoot)
-      if (ilspyCmd) {
-        if (stats.decompiled + stats.failed.length > 0) {
-          console.log(
-            `[decompile] ${mod.packageId}: ${stats.decompiled} assemblies decompiled, ${stats.skipped} skipped, ${stats.failed.length} failed.`,
-          )
-        }
-        if (stats.failed.length > 0) {
-          decompileWarnings.push(
-            `${stats.failed.length} assembly(ies) failed to decompile: ${stats.failed.join(', ')}`,
-          )
-        }
-      } else if (assemblies.length > 0) {
-        decompileWarnings.push('assemblies not decompiled (ilspycmd not installed)')
-      }
+      const stats = copyModTree(mod, destRoot, full)
+      copiedFiles += stats.copied
+      skippedFiles += stats.skipped
+      assets.assetPath = `Mods/${dirName}`
+      assets.activeFolders = selectLoadFolders(mod, gameVersion, profilePackages)
+      const effective = computeEffectiveFiles(mod.rootPath, assets.activeFolders)
+      assets.effectiveFiles = effective.effective
+      assets.shadowedFiles = effective.shadowed
+      const assemblies = computeEffectiveAssemblies(mod.rootPath, assets.activeFolders)
+      assets.warnings = decompileMod(ilspyCmd, assemblies, destRoot, full, gameRoot)
     }
-
     manifestMods.push({
-      ...mod,
-      loadOrder: index,
-      inProfile: true,
-      assetPath,
-      activeFolders,
-      effectiveFiles,
-      shadowedFiles,
-      warnings: [...mod.warnings, ...decompileWarnings],
+      ...mod, ...assets, loadOrder: index, inProfile: true,
+      warnings: [...mod.warnings, ...assets.warnings],
       issues: resolved.issues.filter(issue => issue.packageId === mod.packageId),
     })
   }
@@ -181,6 +154,7 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
   const discoveredNotInProfile = discovered.filter(mod => !inProfileIds.has(mod.packageId))
 
   const manifest: ModsManifest = {
+    gameRoot: resolve(gameRoot),
     generatedAt: new Date().toISOString(),
     gameVersion,
     profile: loaded.profile,
@@ -197,6 +171,21 @@ export async function importMods(options: ImportModsOptions): Promise<ImportMods
   return { manifest, copiedFiles, skippedFiles }
 }
 
+export function emptyModAssets(): Pick<ManifestMod, 'activeFolders' | 'assetPath' | 'effectiveFiles' | 'shadowedFiles' | 'warnings'> {
+  return { assetPath: '', activeFolders: [], effectiveFiles: [], shadowedFiles: [], warnings: [] }
+}
+
+export function decompileMod(ilspyCmd: string | null, assemblies: string[], destRoot: string, full: boolean, gameRoot: string): string[] {
+  const stats = decompileAssemblies(ilspyCmd, assemblies, destRoot, full, gameRoot)
+  if (stats.decompiled || stats.failed.length) {
+    console.error(`[decompile] ${basename(destRoot)}: ${stats.decompiled} decompiled, ${stats.skipped} unchanged, ${stats.failed.length} failed.`)
+  }
+  if (!ilspyCmd && assemblies.length) return ['assemblies not decompiled (ilspycmd not installed)']
+  return stats.failed.length
+    ? [`${stats.failed.length} assembly(ies) failed to decompile: ${stats.failed.join(', ')}`]
+    : []
+}
+
 // #region Full-structure copy
 
 export interface CopyStats {
@@ -204,9 +193,10 @@ export interface CopyStats {
   skipped: number
 }
 
-/** Mirror content directories at declared load roots, walking only their prefixes. */
-export function copyModTree(mod: ModInfo, destRoot: string, full = false): CopyStats {
-  const pathKey = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path
+const pathKey = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path
+
+/** The copy and the fingerprint must visit exactly the same source tree. */
+export function* modContentTree(mod: ModInfo) {
   const folders = new Set(['.', 'Common', ...mod.versionDirs].map(pathKey))
   for (const entries of Object.values(mod.loadFolders)) {
     for (const entry of entries) {
@@ -219,21 +209,18 @@ export function copyModTree(mod: ModInfo, destRoot: string, full = false): CopyS
     for (let i = 1; i <= parts.length; i++) prefixes.add(parts.slice(0, i).join('/'))
   }
 
-  const stats = { copied: 0, skipped: 0 }
-  function walk(relative: string, destDir: string, all: boolean) {
+  function* walk(relative: string, destDir: string, all: boolean): Generator<{
+    srcDir: string; destDir: string; entries: { name: string; destName: string; directory: boolean }[]
+  }> {
     const srcDir = join(mod.rootPath, relative)
-    mkdirSync(destDir, { recursive: true })
-    const stale = new Map(readdirSync(destDir, { withFileTypes: true }).map(e => [pathKey(e.name), e]))
-    if (relative === '.') stale.delete(pathKey('Source-decompiled'))
-
+    const entries = []
+    const children = []
     for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
       const name = entry.name
       const child = relative === '.' ? name : relative + '/' + name
-      const src = join(srcDir, name)
       const contentDir = folders.has(pathKey(relative)) && COPY_DIRS.find(dir =>
         dir === 'About' ? name.toLowerCase() === 'about' : pathKey(dir) === pathKey(name))
       const destName = contentDir || name
-      const dest = join(destDir, destName)
       const rootFile = relative === '.' && name.toLowerCase() === 'loadfolders.xml'
       if (entry.isDirectory()) {
         if (!all && !contentDir && !prefixes.has(pathKey(child))) continue
@@ -242,17 +229,34 @@ export function copyModTree(mod: ModInfo, destRoot: string, full = false): CopyS
         continue
       }
 
+      entries.push({ name, destName, directory: entry.isDirectory() })
+      if (entry.isDirectory()) children.push({ child, dir: join(destDir, destName), all: all || Boolean(contentDir) })
+    }
+    yield { srcDir, destDir, entries }
+    for (const c of children) yield* walk(c.child, c.dir, c.all)
+  }
+
+  yield* walk('.', '', false)
+}
+
+export function copyModTree(mod: ModInfo, destRoot: string, full = false): CopyStats {
+  const stats = { copied: 0, skipped: 0 }
+  for (const dir of modContentTree(mod)) {
+    const destDir = join(destRoot, dir.destDir)
+    mkdirSync(destDir, { recursive: true })
+    const stale = new Map(readdirSync(destDir, { withFileTypes: true }).map(e => [pathKey(e.name), e]))
+    if (!dir.destDir) stale.delete(pathKey('Source-decompiled'))
+    for (const { name, destName, directory } of dir.entries) {
+      const dest = join(destDir, destName)
+      const src = join(dir.srcDir, name)
       const old = stale.get(pathKey(destName))
       stale.delete(pathKey(destName))
-      if (old && old.isDirectory() !== entry.isDirectory()) {
+      if (old && old.isDirectory() !== directory) {
         rmSync(dest, { recursive: true, force: true })
       } else if (old && old.name !== destName) {
         renameSync(join(destDir, old.name), dest)
       }
-      if (entry.isDirectory()) {
-        walk(child, dest, all || Boolean(contentDir))
-        continue
-      }
+      if (directory) continue
 
       const source = statSync(src)
       const existing = statSync(dest, { throwIfNoEntry: false })
@@ -270,7 +274,6 @@ export function copyModTree(mod: ModInfo, destRoot: string, full = false): CopyS
     }
   }
 
-  walk('.', destRoot, false)
   return stats
 }
 
@@ -281,21 +284,24 @@ export function copyModTree(mod: ModInfo, destRoot: string, full = false): CopyS
 export async function snapshotProfileFromGameConfig(
   outPath: string,
   modsConfigPath?: string,
+  gameRoot?: string,
 ): Promise<Profile> {
   const active = readPlayerActiveMods(modsConfigPath)
   if (active === null) {
-    console.error(
-      'Could not read ModsConfig.xml. Set RIMSAGE_MODS_CONFIG or pass --mods-config <path>.',
-    )
-    process.exit(1)
+    throw new Error('Could not read ModsConfig.xml. Set RIMSAGE_MODS_CONFIG or pass --mods-config <path>.')
   }
 
-  const profile = profileFromModsConfig(active)
-  await write(outPath, JSON.stringify(profile, null, 2))
-  console.log(
-    `Profile snapshot written to ${outPath} (${profile.mods.length} community mods, autoOrder=false).`,
+  const installed = gameRoot ? discoverBaseMods({ gameRoot }).map(mod => mod.packageId) : undefined
+  const profile = profileFromModsConfig(active, 'from-game-config', installed)
+  const json = JSON.stringify(profile, null, 2)
+  if (!existsSync(outPath) || readFileSync(outPath, 'utf8') !== json) {
+    const temp = outPath + '.' + crypto.randomUUID() + '.tmp'
+    await write(temp, json)
+    renameSync(temp, outPath)
+  }
+  console.error(
+    `Profile snapshot written to ${outPath} (${profile.mods.length} listed packages, autoOrder=false).`,
   )
-  console.log('Trim the list to the mods you actually need, then re-run import-mods.')
   return profile
 }
 
@@ -314,7 +320,7 @@ Options:
   --workshop-root <p>   workshop content root (default: inferred from gameRoot)
   --mods-config <path>  ModsConfig.xml path (default: auto-discovered)
   --full                force full re-copy (ignore incremental mtime/size)
-  gameRoot defaults to RIMSAGE_GAME_ROOT.
+  gameRoot defaults to RIMSAGE_GAME_ROOT or the last imported installation.
 `)
 }
 
@@ -343,7 +349,7 @@ if (import.meta.main) {
     process.exit(0)
   }
 
-  const gameRoot = positionalArg(args) ?? gameRootFromEnv()
+  const gameRoot = positionalArg(args) ?? gameRootFromEnv() ?? importedGameRoot()
 
   if (!gameRoot || !existsSync(join(gameRoot, 'Version.txt'))) {
     console.error(
@@ -369,7 +375,7 @@ if (import.meta.main) {
       console.error('--from-game-config needs --out <path> or RIMSAGE_PROFILE set.')
       process.exit(1)
     }
-    await snapshotProfileFromGameConfig(out, flagValue(args, '--mods-config'))
+    await snapshotProfileFromGameConfig(out, flagValue(args, '--mods-config'), gameRoot)
     process.exit(0)
   }
 

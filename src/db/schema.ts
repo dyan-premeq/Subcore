@@ -1,4 +1,4 @@
-// Single source of truth for index.db DDL (schema v6).
+// Single source of truth for index.db DDL (schema v7).
 //
 // All CREATE TABLE statements live here — scripts and repositories must not
 // define tables inline. JSON columns are TEXT parsed in the application
@@ -6,7 +6,7 @@
 
 import type { Database } from 'bun:sqlite'
 
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS csharp_index (
   modId     INTEGER,          -- owning mods row; NULL = vanilla decompiled root
   PRIMARY KEY (typeName, filePath)
 );
+
+CREATE INDEX IF NOT EXISTS idx_csharp_mod ON csharp_index(modId);
 
 -- @Name inheritance registry: one row per (name, mod) registration,
 -- mirroring the game's XmlInheritance.nodesByName (a name can be registered
@@ -96,10 +98,12 @@ CREATE TABLE IF NOT EXISTS harmony_patches (
   finalizer    INTEGER
 );
 
+CREATE INDEX IF NOT EXISTS idx_harmony_mod ON harmony_patches(modId);
+
 -- find_refs file-level prefilter: contentless FTS5 over every text file under dist/assets.
 -- Token class (alnum + '_') mirrors rg's \b so a per-token AND is a superset of rg hits.
 CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(
-  body, content='', detail=none, columnsize=0,
+  body, content='', contentless_delete=1, detail=none,
   tokenize="unicode61 tokenchars '_'"
 );
 CREATE TABLE IF NOT EXISTS source_files (
@@ -116,7 +120,7 @@ export function ensureSchema(db: Database): void {
   // no migration layer by design: a stale db is rebuilt from source, never patched
   if (stored && stored.value !== String(SCHEMA_VERSION)) {
     throw new Error(
-      `index.db is schema v${stored.value} but this build expects v${SCHEMA_VERSION} — run "bun run build" to rebuild it.`,
+      `index.db is schema v${stored.value} but this build expects v${SCHEMA_VERSION} — run "bun run sync" to rebuild it.`,
     )
   }
   db
@@ -125,3 +129,12 @@ export function ensureSchema(db: Database): void {
 }
 
 export const SCHEMA_VERSION_META_KEY = 'schema_version'
+
+/** Drop the old index in the transaction that builds its replacement. FTS owns its shadow tables. */
+export function resetSchema(db: Database): void {
+  for (const { name } of db.query<{ name: string }, []>(
+    "SELECT name FROM pragma_table_list WHERE schema = 'main' AND type IN ('table','virtual') AND name NOT LIKE 'sqlite_%' ORDER BY name = 'mods'",
+  ).all()) {
+    db.exec('DROP TABLE "' + name.replaceAll('"', '""') + '"')
+  }
+}

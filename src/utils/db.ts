@@ -1,4 +1,8 @@
 import { Database } from 'bun:sqlite'
 import { indexDbPath } from './env'
 
-export const db = new Database(indexDbPath, { readonly: true })
+let db: Database | undefined
+
+export function readDb(): Database {
+  return db ??= new Database(indexDbPath, { readonly: true })
+}
