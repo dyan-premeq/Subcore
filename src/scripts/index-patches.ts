@@ -90,38 +90,44 @@ export async function indexPatches(
   // ① interpreter: unified tree + patch application (game order)
   console.error(`Building unified def tree from ${defRefs.length} files...`)
   const evaluator = new PatchEvaluator({ activeModNames, onFindMod: names => conditions?.findMod(names) })
-  await evaluator.buildTree(defRefs)
+  let defGroups: PatchedDefGroup[]
+  let changedBy: Map<string, number[]>
+  try {
+    await evaluator.buildTree(defRefs)
 
-  console.error('Applying patches...')
-  if (opts.skipApply) {
-    await evaluator.collectPatchMetadata(patchRefs)
-  } else {
-    await evaluator.applyPatches(patchRefs)
+    console.error('Applying patches...')
+    if (opts.skipApply) {
+      await evaluator.collectPatchMetadata(patchRefs)
+    } else {
+      await evaluator.applyPatches(patchRefs)
+    }
+
+    // persist patch_ops (search_patches stays usable in both modes)
+    db.run('DELETE FROM patch_ops')
+    replacePatchOps(db, evaluator.opRecords)
+
+    const stats = evaluator.stats()
+    console.error(
+      `Patch ops: ${evaluator.opRecords.length} total — ` +
+        Object.entries(stats)
+          .filter(([, n]) => n > 0)
+          .map(([status, n]) => `${status}: ${n}`)
+          .join(', '),
+    )
+
+    if (opts.skipApply) {
+      db.run('DELETE FROM patched_defs')
+      console.error('--skip-patches: patched_defs left empty.')
+      return
+    }
+
+    // ② JSON pipeline on the patched tree: parse → MayRequire prune →
+    // inheritance re-resolution → patched_defs (M2 code reused verbatim)
+    console.error('Resolving patched defs...')
+    ;({ defGroups, changedBy } = evaluator.serialize())
+  } finally {
+    evaluator.dispose()
   }
-
-  // persist patch_ops (search_patches stays usable in both modes)
-  db.run('DELETE FROM patch_ops')
-  replacePatchOps(db, evaluator.opRecords)
-
-  const stats = evaluator.stats()
-  console.error(
-    `Patch ops: ${evaluator.opRecords.length} total — ` +
-      Object.entries(stats)
-        .filter(([, n]) => n > 0)
-        .map(([status, n]) => `${status}: ${n}`)
-        .join(', '),
-  )
-
-  if (opts.skipApply) {
-    db.run('DELETE FROM patched_defs')
-    console.error('--skip-patches: patched_defs left empty.')
-    return
-  }
-
-  // ② JSON pipeline on the patched tree: parse → MayRequire prune →
-  // inheritance re-resolution → patched_defs (M2 code reused verbatim)
-  console.error('Resolving patched defs...')
-  const { defGroups, changedBy } = evaluator.serialize()
 
   const flat: FlatPatchedDef[] = []
   let mayRequireSkipped = 0

@@ -7,6 +7,7 @@ import {
   normalizeXpath,
   PATCH_DEF_LOAD_ORDER,
   type PatchOpRecord,
+  type PatchOpStatus,
 } from '../../src/utils/patch-evaluator'
 import { rmTemp } from '../helpers/fs'
 
@@ -23,10 +24,10 @@ afterAll(async () => {
 // #region Harness
 
 interface Harness {
-  evaluator: PatchEvaluator
   records: PatchOpRecord[]
   groups: ReturnType<PatchEvaluator['serialize']>['defGroups']
   changedBy: Map<string, number[]>
+  stats: Record<PatchOpStatus, number>
 }
 
 async function run(
@@ -38,21 +39,26 @@ async function run(
   await writeFile(defsPath, defs)
 
   const evaluator = new PatchEvaluator({ activeModNames: new Set(activeModNames) })
-  await evaluator.buildTree([
-    { absPath: defsPath, filePath: 'Core/Defs/Things.xml', modId: 1, loadOrder: 0 },
-  ])
-
-  let i = 0
-  for (const patch of patches) {
-    const patchPath = join(tempDir, `patch-${i++}.xml`)
-    await writeFile(patchPath, patch)
-    await evaluator.applyPatches([
-      { absPath: patchPath, filePath: `Beta/Patches/P${i}.xml`, modId: 2, loadOrder: 1 },
+  try {
+    await evaluator.buildTree([
+      { absPath: defsPath, filePath: 'Core/Defs/Things.xml', modId: 1, loadOrder: 0 },
     ])
-  }
 
-  const { defGroups: groups, changedBy } = evaluator.serialize()
-  return { evaluator, records: evaluator.opRecords, groups, changedBy }
+    let i = 0
+    for (const patch of patches) {
+      const patchPath = join(tempDir, `patch-${i++}.xml`)
+      await writeFile(patchPath, patch)
+      await evaluator.applyPatches([
+        { absPath: patchPath, filePath: `Beta/Patches/P${i}.xml`, modId: 2, loadOrder: 1 },
+      ])
+    }
+
+    const { defGroups: groups, changedBy } = evaluator.serialize()
+    const stats = evaluator.stats()
+    return { records: evaluator.opRecords, groups, changedBy, stats }
+  } finally {
+    evaluator.dispose()
+  }
 }
 
 /** Parses a group's <Defs> XML into fast-xml-parser objects. */
@@ -89,10 +95,14 @@ describe('patch-evaluator: tree building', () => {
 
   test('skips unparseable files with a warning instead of throwing', async () => {
     const evaluator = new PatchEvaluator({ activeModNames: new Set() })
-    await evaluator.buildTree([
-      { absPath: join(tempDir, 'nope.xml'), filePath: 'x/y.xml', modId: 1, loadOrder: 0 },
-    ])
-    expect(evaluator.serialize().defGroups).toHaveLength(0)
+    try {
+      await evaluator.buildTree([
+        { absPath: join(tempDir, 'nope.xml'), filePath: 'x/y.xml', modId: 1, loadOrder: 0 },
+      ])
+      expect(evaluator.serialize().defGroups).toHaveLength(0)
+    } finally {
+      evaluator.dispose()
+    }
   })
 })
 
@@ -357,7 +367,7 @@ describe('patch-evaluator: bookkeeping', () => {
       operation('PatchOperationTest', `<xpath>Defs/ThingDef[defName="Pawn"]</xpath>`),
       operation('PatchOperationTest', `<xpath>Defs/ThingDef[defName="No"]</xpath>`),
     ])
-    expect(h.evaluator.stats()).toMatchObject({ applied: 1, 'no-match': 1 })
+    expect(h.stats).toMatchObject({ applied: 1, 'no-match': 1 })
   })
 })
 
@@ -369,18 +379,149 @@ describe('patch-evaluator: collectPatchMetadata (--skip-patches)', () => {
     await writeFile(patchPath, operation('PatchOperationAdd', `<xpath>Defs/ThingDef[defName="T"]</xpath><value><x/></value>`))
 
     const evaluator = new PatchEvaluator({ activeModNames: new Set() })
-    await evaluator.buildTree([{ absPath: defsPath, filePath: 'Core/D.xml', modId: 1, loadOrder: 0 }])
-    await evaluator.collectPatchMetadata([{ absPath: patchPath, filePath: 'Beta/P.xml', modId: 2, loadOrder: 1 }])
+    try {
+      await evaluator.buildTree([{ absPath: defsPath, filePath: 'Core/D.xml', modId: 1, loadOrder: 0 }])
+      await evaluator.collectPatchMetadata([{ absPath: patchPath, filePath: 'Beta/P.xml', modId: 2, loadOrder: 1 }])
 
-    expect(evaluator.opRecords).toHaveLength(1)
-    expect(evaluator.opRecords[0]).toMatchObject({
-      opClass: 'patchoperationadd',
-      xpath: 'Defs/ThingDef[defName="T"]',
-      status: 'not-evaluated',
-      targetDefs: [],
-    })
-    const { defGroups } = evaluator.serialize()
-    expect(defGroups[0]!.defNames).toEqual(['T']) // untouched tree
+      expect(evaluator.opRecords).toHaveLength(1)
+      expect(evaluator.opRecords[0]).toMatchObject({
+        opClass: 'patchoperationadd',
+        xpath: 'Defs/ThingDef[defName="T"]',
+        status: 'not-evaluated',
+        targetDefs: [],
+      })
+      const { defGroups } = evaluator.serialize()
+      expect(defGroups[0]!.defNames).toEqual(['T']) // untouched tree
+    } finally {
+      evaluator.dispose()
+    }
+  })
+})
+
+describe('patch-evaluator: XPath 1.0 fidelity (RimWorld .NET parity)', () => {
+  const parityDefs = `<Defs>
+    <ThingDef>
+      <defName>Gun_A</defName>
+      <label>OldLabel</label>
+      <designationCategory>Old</designationCategory>
+      <statBases><MarketValue>100</MarketValue><Mass>10</Mass></statBases>
+      <weaponTags><li>IndustrialGunAdvanced</li><li>SpacerGun</li></weaponTags>
+      <filth><disappearsInDays>15~20</disappearsInDays></filth>
+      <tradeable>True</tradeable>
+      <aNum>9</aNum><bNum>10</bNum>
+    </ThingDef>
+    <ThingDef>
+      <defName>Gun_B</defName>
+      <statBases><MarketValue>50</MarketValue><Mass>abc</Mass></statBases>
+      <weaponTags><li>Neolithic</li></weaponTags>
+      <filth><disappearsInDays>30</disappearsInDays></filth>
+      <tradeable>false</tradeable>
+      <aNum>20</aNum><bNum>10</bNum>
+    </ThingDef>
+    <PawnKindDef Name="MechanentPirateTierBase" AT_Tag_InjectVagrantAlternatePawnKinds="True">
+      <defName>PK_A</defName>
+    </PawnKindDef>
+  </Defs>`
+
+  test('string function on multi-node set uses first node only (no XPTY0004)', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationAdd', `<xpath>Defs/ThingDef[contains(weaponTags/li, "Gun")]</xpath><value><hit>1</hit></value>`),
+      operation('PatchOperationAdd', `<xpath>Defs/ThingDef[contains(weaponTags/li, "Spacer")]</xpath><value><hit>2</hit></value>`),
+    ])
+    expect(h.records[0]!.status).toBe('applied')
+    expect(h.records[0]!.targetDefs).toEqual(['Gun_A'])
+    expect(h.records[1]!.status).toBe('no-match')
+    const gunA = parseGroup(h).ThingDef.find((d: any) => d.defName === 'Gun_A')
+    expect(gunA.hit).toBe(1)
+  })
+
+  test('numeric comparisons treat non-numeric text as NaN rather than throwing FORG0001', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationTest', `<xpath>Defs/ThingDef[statBases/Mass &gt; 5]</xpath>`),
+      operation('PatchOperationTest', `<xpath>Defs/ThingDef[statBases/Mass = 10]</xpath>`),
+      operation('PatchOperationAdd', `<xpath>Defs/ThingDef[filth/disappearsInDays &gt; 20]</xpath><value><vanish>slow</vanish></value>`),
+    ])
+    expect(h.records.map(r => r.status)).toEqual(['applied', 'applied', 'applied'])
+    expect(h.records[2]!.targetDefs).toEqual(['Gun_B'])
+    const gunB = parseGroup(h).ThingDef.find((d: any) => d.defName === 'Gun_B')
+    expect(gunB.vanish).toBe('slow')
+  })
+
+  test('element-to-element relational operator compares numerically, not lexicographically', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationTest', `<xpath>Defs/ThingDef[aNum &lt; bNum]</xpath>`),
+    ])
+    expect(h.records[0]!.status).toBe('applied')
+  })
+
+  test('node-set compared with true() converts node-set to boolean (handles True)', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationAdd', `<xpath>Defs/ThingDef[tradeable = true()]</xpath><value><boolHit>yes</boolHit></value>`),
+    ])
+    expect(h.records[0]!.status).toBe('applied')
+    expect(h.records[0]!.targetDefs).toEqual(['Gun_A', 'Gun_B'])
+  })
+
+  test('arithmetic with non-numeric sibling evaluates remaining defs cleanly', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationTest', `<xpath>Defs/ThingDef[statBases/MarketValue + statBases/Mass &gt; 50]</xpath>`),
+    ])
+    expect(h.records[0]!.status).toBe('applied')
+  })
+
+  test('rejects XPath 2.0/3.1 syntax and functions with status error', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationTest', `<xpath>Defs/(ThingDef|RecipeDef)[defName="Gun_A"]</xpath>`),
+      operation('PatchOperationTest', `<xpath>Defs/ThingDef[matches(defName, "^Gun_")]</xpath>`),
+      operation('PatchOperationTest', `<xpath>Defs/ThingDef[ends-with(defName, "_A")]</xpath>`),
+      operation('PatchOperationTest', `<xpath>Defs/ThingDef[lower-case(defName) = "gun_a"]</xpath>`),
+    ])
+    expect(h.records.map(r => r.status)).toEqual(['error', 'error', 'error', 'error'])
+  })
+
+  test('rejects non-node-set XPath expressions with status error', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationTest', `<xpath>count(Defs/ThingDef)</xpath>`),
+      operation('PatchOperationAdd', `<xpath>count(Defs/ThingDef)</xpath><value><x/></value>`),
+    ])
+    expect(h.records.map(r => r.status)).toEqual(['error', 'error'])
+  })
+
+  test('accepts real Workshop lexer forms (or@Name and @ Attr)', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationTest', `<xpath>Defs/PawnKindDef[ @Name="MechanentBase" or @Name="PersonaBase" or@Name="MechanentPirateTierBase"]</xpath>`),
+      operation('PatchOperationAdd', `<xpath>Defs/PawnKindDef[@AT_Tag_InjectVagrantAlternatePawnKinds="True"][not(@ AT_Tag_Nexaga_Ayakindified="True")]</xpath><value><lexerOk>1</lexerOk></value>`),
+    ])
+    expect(h.records.map(r => r.status)).toEqual(['applied', 'applied'])
+    const pk = parseGroup(h).PawnKindDef.find((d: any) => d.defName === 'PK_A')
+    expect(pk.lexerOk).toBe(1)
+  })
+
+  test('supports replacing and removing text() target nodes', async () => {
+    const h = await run(parityDefs, [
+      operation('PatchOperationReplace', `<xpath>Defs/ThingDef[defName="Gun_A"]/designationCategory[text()="Old"]/text()</xpath><value>New</value>`),
+      operation('PatchOperationRemove', `<xpath>Defs/ThingDef[defName="Gun_A"]/label/text()</xpath>`),
+    ])
+    expect(h.records.map(r => r.status)).toEqual(['applied', 'applied'])
+    expect(h.records[0]!.targetDefs).toEqual(['Gun_A'])
+    expect(h.records[1]!.targetDefs).toEqual(['Gun_A'])
+    const gunA = parseGroup(h).ThingDef.find((d: any) => d.defName === 'Gun_A')
+    expect(gunA.designationCategory).toBe('New')
+    expect(gunA.label).toBe('')
+  })
+
+  test('handles ancestor+descendant remove and removed top-level def reuse safely', async () => {
+    const h = await run(
+      `<Defs><ThingDef Name="TBase"><defName>T</defName><a><b>1</b></a></ThingDef><ThingDef><defName>Keep</defName></ThingDef></Defs>`,
+      [
+        operation('PatchOperationRemove', `<xpath>Defs/ThingDef[defName="T"]//*|Defs/ThingDef[defName="T"]</xpath>`),
+        operation('PatchOperationAdd', `<xpath>/Defs</xpath><value><ThingDef Name="Added"><defName>NewDef</defName></ThingDef></value>`),
+      ],
+    )
+    expect(h.records.map(r => r.status)).toEqual(['applied', 'applied'])
+    expect(h.groups.find(g => g.loadOrder === 0)?.defNames).toEqual(['Keep'])
+    const patchGroup = h.groups.find(g => g.loadOrder === PATCH_DEF_LOAD_ORDER)
+    expect(patchGroup?.defNames).toEqual(['NewDef'])
   })
 })
 

@@ -8,7 +8,7 @@ import type {
 } from '../types'
 import { compareStrings } from './compare'
 import { XMLParser } from 'fast-xml-parser'
-import { DOMParser } from 'slimdom'
+import { XmlDocument, XmlElement } from 'libxml2-wasm'
 
 // Preserve dotted version strings such as 1.10.
 const metadataParser = new XMLParser({ parseTagValue: false, ignoreDeclaration: true })
@@ -289,23 +289,29 @@ export function parseLoadFoldersXmlRaw(rootPath: string, observe?: (path: string
 
   const result: ModInfo['loadFolders'] = Object.create(null)
   try {
-    const root = new DOMParser().parseFromString(readFileSync(path, 'utf8'), 'text/xml').documentElement
-    // 1.7 ModLoadFolders.LoadDataFromXmlCustom appends repeated blocks in document order.
-    for (const block of root?.children ?? []) {
-      const key = normalizeVersionKey(block.tagName)
-      if (key === undefined) continue
-      const list = result[key] ??= []
-      for (const item of block.children) {
-        const text = (item.textContent ?? '').replaceAll('\\', '/')
-        const entry: LoadFolderEntry = { folderName: text === '/' ? '' : text }
-        const any = splitPackageIds(item.getAttribute('IfModActive'))
-        const all = splitPackageIds(item.getAttribute('IfModActiveAll'))
-        const none = splitPackageIds(item.getAttribute('IfModNotActive'))
-        if (any) entry.requiredAnyOf = any
-        if (all) entry.requiredAllOf = all
-        if (none) entry.disallowedAnyOf = none
-        list.push(entry)
+    const doc = XmlDocument.fromString(readFileSync(path, 'utf8'))
+    try {
+      // 1.7 ModLoadFolders.LoadDataFromXmlCustom appends repeated blocks in document order.
+      for (let block = doc.root.firstChild; block; block = block.next) {
+        if (!(block instanceof XmlElement)) continue
+        const key = normalizeVersionKey(block.name)
+        if (key === undefined) continue
+        const list = result[key] ??= []
+        for (let item = block.firstChild; item; item = item.next) {
+          if (!(item instanceof XmlElement)) continue
+          const text = item.content.replaceAll('\\', '/')
+          const entry: LoadFolderEntry = { folderName: text === '/' ? '' : text }
+          const any = splitPackageIds(item.attr('IfModActive')?.value)
+          const all = splitPackageIds(item.attr('IfModActiveAll')?.value)
+          const none = splitPackageIds(item.attr('IfModNotActive')?.value)
+          if (any) entry.requiredAnyOf = any
+          if (all) entry.requiredAllOf = all
+          if (none) entry.disallowedAnyOf = none
+          list.push(entry)
+        }
       }
+    } finally {
+      doc.dispose()
     }
   } catch {
     return {}

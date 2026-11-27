@@ -43,56 +43,60 @@ async function reportWorkshopCorpus(): Promise<void> {
   if (workshopRoot) roots.push({ dir: workshopRoot, label: 'workshop' })
 
   const evaluator = new PatchEvaluator({ activeModNames: new Set() })
-  let files = 0
+  try {
+    let files = 0
 
-  for (const root of roots) {
-    const glob = new Glob('**/Patches/**/*.xml')
-    let rootFiles = 0
-    for await (const relativePath of glob.scan({ cwd: root.dir, onlyFiles: true })) {
-      if (relativePath.split(sep).some(part => part.startsWith('.'))) continue
-      await evaluator.collectPatchMetadata([
-        { absPath: join(root.dir, relativePath), filePath: `${root.label}/${relativePath}`, modId: 0, loadOrder: 0 },
-      ])
-      rootFiles++
+    for (const root of roots) {
+      const glob = new Glob('**/Patches/**/*.xml')
+      let rootFiles = 0
+      for await (const relativePath of glob.scan({ cwd: root.dir, onlyFiles: true })) {
+        if (relativePath.split(sep).some(part => part.startsWith('.'))) continue
+        await evaluator.collectPatchMetadata([
+          { absPath: join(root.dir, relativePath), filePath: `${root.label}/${relativePath}`, modId: 0, loadOrder: 0 },
+        ])
+        rootFiles++
+      }
+      files += rootFiles
+      console.log(`${root.label}: ${rootFiles} patch files (${root.dir})`)
     }
-    files += rootFiles
-    console.log(`${root.label}: ${rootFiles} patch files (${root.dir})`)
-  }
 
-  const stats = evaluator.stats()
-  const total = Object.values(stats).reduce((a, b) => a + b, 0)
-  console.log(`\nStatic scan of ${files} files, ${total} operations:\n`)
-  for (const [status, n] of Object.entries(stats)) {
-    if (n === 0) continue
-    console.log(`  ${status.padEnd(20)} ${String(n).padStart(7)}  (${((n / total) * 100).toFixed(2)}%)`)
-  }
+    const stats = evaluator.stats()
+    const total = Object.values(stats).reduce((a, b) => a + b, 0)
+    console.log(`\nStatic scan of ${files} files, ${total} operations:\n`)
+    for (const [status, n] of Object.entries(stats)) {
+      if (n === 0) continue
+      console.log(`  ${status.padEnd(20)} ${String(n).padStart(7)}  (${((n / total) * 100).toFixed(2)}%)`)
+    }
 
-  const unsupported = stats['unsupported-custom'] ?? 0
-  const rate = (unsupported / total) * 100
-  // framework-specific custom classes (e.g. Combat Extended's
-  // MakeGunCECompatible, spread across hundreds of CE-compat patch files)
-  // are a known deviation, not an interpreter gap — the per-class view
-  // separates them from genuinely unsupported standard operations
-  const byClass = new Map<string, number>()
-  for (const record of evaluator.opRecords) {
-    if (record.status !== 'unsupported-custom') continue
-    byClass.set(record.opClass, (byClass.get(record.opClass) ?? 0) + 1)
-  }
+    const unsupported = stats['unsupported-custom'] ?? 0
+    const rate = (unsupported / total) * 100
+    // framework-specific custom classes (e.g. Combat Extended's
+    // MakeGunCECompatible, spread across hundreds of CE-compat patch files)
+    // are a known deviation, not an interpreter gap — the per-class view
+    // separates them from genuinely unsupported standard operations
+    const byClass = new Map<string, number>()
+    for (const record of evaluator.opRecords) {
+      if (record.status !== 'unsupported-custom') continue
+      byClass.set(record.opClass, (byClass.get(record.opClass) ?? 0) + 1)
+    }
 
-  console.log(
-    `\nunsupported-custom rate: ${rate.toFixed(2)}% total — top custom classes:`,
-  )
-  for (const [opClass, n] of [...byClass.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) {
-    console.log(`  ${opClass} ×${n}`)
-  }
+    console.log(
+      `\nunsupported-custom rate: ${rate.toFixed(2)}% total — top custom classes:`,
+    )
+    for (const [opClass, n] of [...byClass.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) {
+      console.log(`  ${opClass} ×${n}`)
+    }
 
-  const largest = [...byClass.values()].reduce((max, n) => Math.max(max, n), 0)
-  const rest = unsupported - largest
-  const restRate = (rest / total) * 100
-  console.log(
-    `\nexcluding the single largest custom class: ${rest} ops (${restRate.toFixed(2)}%) — ` +
-      `${restRate < 2 ? 'PASS' : 'FAIL'} (<2%; that class is a mod framework's own PatchOperation, a known deviation)`,
-  )
+    const largest = [...byClass.values()].reduce((max, n) => Math.max(max, n), 0)
+    const rest = unsupported - largest
+    const restRate = (rest / total) * 100
+    console.log(
+      `\nexcluding the single largest custom class: ${rest} ops (${restRate.toFixed(2)}%) — ` +
+        `${restRate < 2 ? 'PASS' : 'FAIL'} (<2%; that class is a mod framework's own PatchOperation, a known deviation)`,
+    )
+  } finally {
+    evaluator.dispose()
+  }
 }
 
 // #endregion
