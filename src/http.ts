@@ -5,6 +5,7 @@ import { createServer } from './server'
 const mcpHandler = createMcpHandler(createServer)
 
 const httpServer = serve({
+  hostname: '127.0.0.1',
   routes: {
     '/health': Response.json({ status: 'ok' }),
     '/mcp': (req, bunServer) => {
