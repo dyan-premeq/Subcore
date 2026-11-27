@@ -2,122 +2,121 @@
 
 [![MCP Server](https://badge.mcpx.dev?type=server)](https://modelcontextprotocol.io/introduction) [![bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun)](https://bun.com/) [![ripgrep](https://img.shields.io/badge/ripgrep-%23000000.svg?style=flat&logo=rust)](https://github.com/BurntSushi/ripgrep)
 
-Subcore is a Model Context Protocol (MCP) server for RimWorld mod development and codebase analysis. The project is an enhanced fork of [**realloon/RimSage**](https://github.com/realloon/RimSage),  overhauled specifically for **modded environments**. 
+English | [简体中文](./README_zh.md)
 
-Subcore reconstructs RimWorld's mod loading pipeline—evaluating XML `PatchOperation` rules in load order, resolving cross-mod `XmlInheritance`, indexing decompiled C# assemblies and Harmony patches, and providing exhaustive cross-layer reference lookups for AI agents.
+Subcore is a Model Context Protocol (MCP) server for RimWorld mod development and modded codebase analysis. It is an enhanced fork of [**realloon/RimSage**](https://github.com/realloon/RimSage), rebuilt for **modded environments**.
 
----
-
-## MCP Tools
-
-Subcore provides 10 tools tailored for AI agent workflows:
-
-### Cross-Layer Reference Tracing
-
-- **`find_refs`** — Exhaustive reference lookup across all layers simultaneously: vanilla Defs, C# source, mod XML, decompiled mod assemblies, XML patches, and Harmony hooks. Takes a single identifier (`defName`, C# type, or method).
-
-### Def Inspection & Discovery
-
-- **`get_def_details`** — Inspect full XML for a specific `defName` along with its override lineage.
-  - `view="patched"`: Game runtime truth after XML patches and inheritance resolution.
-  - `view="merged"`: Inheritance-resolved XML without patches.
-  - `view="raw"`: Authored XML as written in source.
-- **`search_defs`** — Fast indexed search by partial `defName` or in-game label. Supports `defType` and `mod` filters.
-
-### Patch & Hook Reverse-Lookup
-
-- **`search_patches`** — Reverse lookup of XML `PatchOperation` rules by target `defName`, patching mod (`packageId`), or operation class (e.g. `PatchOperationReplace`).
-- **`search_harmony`** — Reverse lookup of Harmony patches by target C# class (`targetType`) or method (`targetMethod`). Static analysis of mod C# and assemblies.
-
-### C# Source Navigation
-
-- **`read_csharp_symbol`** — Read the source code of a C# class, method, or field by name without needing its file path. Resolves across vanilla code and decompiled mod assemblies.
-- **`search_source`** — Regex search with FTS identifier pre-filtering across all source files and Defs. Supports scope (`all`, `vanilla`, `mods`, or a specific `packageId`) and `loaded_only` filters.
-
-### Workspace & Profile
-
-- **`list_mods`** — Overview of active mods in the profile, load order, asset counts, and dependency/compatibility warnings.
-- **`read_file`** — Read a specific file by relative path with optional line offsets.
-- **`list_directory`** — Browse directory contents within the asset sandbox.
+Subcore reconstructs RimWorld's mod loading pipeline—resolving `LoadFolders.xml`, evaluating XML `PatchOperation` rules in load order before `XmlInheritance`, indexing decompiled C# assemblies and Harmony hooks, and exposing fast, cross-layer lookups to AI agents over MCP.
 
 ---
 
-## Setup & Usage
+## Quick Start
 
 ### 1. Prerequisites
 
-- [Bun](https://bun.com/) (v1.0+)
-
-- [ripgrep](https://github.com/BurntSushi/ripgrep)
-
-- For assembly decompilation, install [ilspycmd](https://github.com/icsharpcode/ILSpy):
-  
+- [Bun](https://bun.com/) (bundled with SQLite 3.43+ and [FTS5 contentless-delete](https://www.sqlite.org/fts5.html#contentless_delete_tables) support)
+- [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg` on `PATH`)
+- Optional, for C# assembly decompilation: [ilspycmd](https://github.com/icsharpcode/ILSpy)
   ```sh
   dotnet tool install -g ilspycmd
   ```
 
 ### 2. Install
 
-Clone the repository, then in `Subcore/` folder, run:
-
 ```sh
 bun install
 ```
 
-### 3. Import Vanilla Assets
+### 3. Run Your First Sync
 
-Import XML and decompile the RimWorld 1.7 assemblies from your local installation:
+On the first sync, pass the directory containing RimWorld's `Version.txt`. Subcore remembers this path for future runs (or you can set `RIMSAGE_GAME_ROOT`).
+
+- **Start from your current RimWorld mod list** (snapshots `ModsConfig.xml` into `rimsage.profile.json` and indexes it):
+  ```sh
+  bun run sync "/path/to/RimWorld" --from-game-config
+  ```
+- **Or use a hand-curated development profile** (edit `rimsage.profile.json`, then sync; if the file is missing, Subcore falls back to vanilla-only):
+  ```sh
+  bun run sync "/path/to/RimWorld"
+  ```
+
+> Decompiling RimWorld for mod development is permitted under the [RimWorld EULA](https://rimworldgame.com/eula).
+
+---
+
+## Profiles & Syncing
+
+Subcore deliberately separates your **development profile** from the game's live **`ModsConfig.xml`**:
+
+| Source                                                                                 | Role                                                                | Used by default?                                                                           |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `rimsage.profile.json` (or `RIMSAGE_PROFILE` / `--profile`)                            | **Single source of truth** for what Subcore imports and indexes     | **Yes** (`bun run sync`, MCP `sync_profile`)                                               |
+| RimWorld `ModsConfig.xml` (auto-discovered or `RIMSAGE_MODS_CONFIG` / `--mods-config`) | Optional snapshot source of the player's currently enabled mod list | **No** — only read when you explicitly pass `--from-game-config` or `fromGameConfig: true` |
+
+Why? When developing a mod, your curated test profile should stay stable even if you change mods for a personal playthrough. Ordinary sync refreshes files and indexes for the **configured development profile** (picking up edits to `rimsage.profile.json`, local mod changes, Steam Workshop updates, or RimWorld version updates) without touching it from `ModsConfig.xml`.
+
+### Common Sync Commands
 
 ```sh
-bun run import:vanilla "<gameRoot>"
+# Incremental sync of the current development profile (fast no-op when unchanged)
+bun run sync
+
+# Overwrite rimsage.profile.json with RimWorld's active ModsConfig.xml, then sync
+bun run sync --from-game-config
+
+# Force a full re-import and rebuild of all indexes even when inputs are unchanged
+bun run sync --full
+
+# Override input paths for a single run
+bun run sync "/path/to/RimWorld" \
+  --profile ./my.profile.json \
+  --mods-config "/path/to/ModsConfig.xml" \
+  --workshop-root "/path/to/workshop/content/294100"
 ```
 
-*(Decompiling RimWorld for mod development is permitted under the [RimWorld EULA](https://rimworldgame.com/eula).)*
+`bun run sync` prints a JSON summary reporting `status` (`"up-to-date"` or `"synced"`), `mode` (`"unchanged"`, `"incremental"`, or `"full"`), `changedMods`, `removedMods`, `xmlRebuilt`, and `elapsedMs`. Older SQLite schema versions are rebuilt automatically on the first sync.
 
-### 4. Configure & Import Mods
+Individual stage scripts (`import:vanilla`, `import:mods`, `clean`, `index:mods`, `index:defs`, `index:patches`, `index:csharp`, `index:source`, `build`) remain available for single-stage workflows.
 
-The program uses a decoupled **profile** (`rimsage.profile.json`) to define which mods to index, independent of your player save state.
-
-Generate a profile from your game's active mod list:
-
-```sh
-bun run import:mods /path/to/RimWorld --from-game-config --out rimsage.profile.json
-```
-
-Or write `rimsage.profile.json` manually:
+### Profile Format (`rimsage.profile.json`)
 
 ```jsonc
 {
   "name": "my-mod-project",
-  "base": "all-dlc", // "core-only" | "all-dlc"
+  "gameVersion": "1.7", // Optional: warns if major.minor differs from installed RimWorld
+  "base": "all-dlc", // "all-dlc" | "core-only"
   "mods": [
     "brrainz.harmony",
     "oskarpotocki.vanillafactionsexpanded.core",
     "mehni.pickupandhaul"
   ],
-  "autoOrder": true // Topological sort by dependencies
+  "autoOrder": true // true = topological sort by About.xml rules; false = preserve array order
 }
 ```
 
-Import mod assets and decompile their assemblies:
+When generated via `--from-game-config`, Subcore sets `autoOrder: false` to preserve your exact in-game load order (and switches `base` to `"core-only"` with explicit DLC entries if only a subset of installed DLCs is active).
 
-```sh
-bun run import:mods /path/to/RimWorld
-```
+### Environment Variables
 
-### 5. Build Database Index
+| Variable                | Purpose                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------- |
+| `RIMSAGE_GAME_ROOT`     | RimWorld installation directory (overrides the remembered path)                         |
+| `RIMSAGE_WORKSHOP_ROOT` | Steam Workshop `294100` folder (auto-discovered beside the game root by default)        |
+| `RIMSAGE_MODS_CONFIG`   | Path to `ModsConfig.xml` (used only with `--from-game-config` / `fromGameConfig: true`) |
+| `RIMSAGE_PROFILE`       | Alternate profile JSON path (defaults to `<repo>/rimsage.profile.json`)                 |
+| `PORT`                  | Listening port for `bun run start:http` (defaults to `3000`)                            |
 
-Build the SQLite index and patch cache:
+CLI flags take precedence over environment variables.
 
-```sh
-bun run build
-```
+---
 
-### 6. Connect to Agent Clients
+## Connect to MCP Clients
 
-#### Stdio Transport (Cursor, Claude Desktop, Antigravity, etc.)
+Subcore embeds built-in MCP server `instructions` and tool schemas so compliant MCP hosts automatically give the model tool-routing and verification guidance.
 
-Add to your client's MCP settings (e.g. `.cursor/mcp.json` or `claude_desktop_config.json`):
+### Stdio Transport (Claude Code, Cursor, Claude Desktop, Antigravity, etc.)
+
+Add Subcore to your client's MCP configuration (e.g. `.cursor/mcp.json` or `claude_desktop_config.json`):
 
 ```json
 {
@@ -130,16 +129,16 @@ Add to your client's MCP settings (e.g. `.cursor/mcp.json` or `claude_desktop_co
 }
 ```
 
-#### Streamable HTTP Transport
+### Streamable HTTP Transport
 
-Alternatively, start the local HTTP server:
+Start the local HTTP server:
 
 ```sh
 bun run start:http
-# Listening on http://localhost:3000/mcp
+# Exposes /mcp (Streamable HTTP) and /health
 ```
 
-And configure your client with the local URL:
+Then point your client at the local endpoint:
 
 ```json
 {
@@ -153,30 +152,91 @@ And configure your client with the local URL:
 
 ---
 
+## MCP Tools
+
+Subcore exposes **10 read-only query tools** and **1 explicit sync tool**.
+
+### Cross-Layer Reference Tracing
+
+- **`find_refs`** — Exhaustive reference lookup across all layers at once: vanilla Defs and C# source, mod XML, decompiled mod assemblies, XML patches, and Harmony hooks. Takes one exact identifier (`defName`, C# type, or method).
+
+### Def Inspection & Discovery
+
+- **`get_def_details`** — Full XML and override lineage for one exact `defName`.
+  - `view="merged"` *(default)*: Inheritance-resolved XML without patches.
+  - `view="patched"`: Runtime-evaluated XML after load-order patches and inheritance.
+  - `view="raw"`: Authored XML as written in source.
+  - `dup="effective"` *(default)* returns the load-order winner; `dup="all"` returns every defining mod's version.
+- **`search_defs`** — Fast indexed search by partial `defName` or in-game label (or omit `query` to enumerate defs), with `defType`, `mod`, and `dup` filters.
+
+### Patch & Hook Reverse-Lookup
+
+- **`search_patches`** — Reverse lookup of XML `PatchOperation` rules by target `defName`, patching mod (`packageId`), or operation class (e.g. `PatchOperationReplace`).
+- **`search_harmony`** — Reverse lookup of Harmony patches by `targetType`, `targetMethod`, or patching `mod`. Static analysis of mod C# and decompiled assemblies; runtime-resolved targets are marked `dynamic`.
+
+### C# & Source Navigation
+
+- **`read_csharp_symbol`** — Read a C# class, method, or field without knowing its file path (`FoodUtility`, `RimWorld.FoodUtility`, `QuestUtility.IsQuestLodger`, or explicit `memberName`). Resolves across vanilla code and decompiled mod assemblies.
+- **`search_source`** — Search across all XML and C# files with `scope` (`all`, `vanilla`, `mods`, or a `packageId`), `file_pattern`, and `loaded_only` filters. Plain identifiers use the FTS5 index; full regex falls back to `ripgrep`.
+- **`read_file`** — Read a specific file inside the asset sandbox by relative path and line range.
+- **`list_directory`** — Browse directories inside the asset sandbox.
+
+### Profile & Index Management
+
+- **`list_mods`** — Overview of active mods in the profile, load order, and dependency/compatibility warnings (`detail: true` + `page` or `packageId` for per-mod folders and asset counts).
+- **`sync_profile`** — Refresh imported assets and the SQLite index for the configured development profile.
+  - `fromGameConfig` *(default `false`)*: Set `true` **only** when you explicitly want to replace the development profile with a snapshot of `ModsConfig.xml` before syncing.
+  - `full` *(default `false`)*: Force a fresh re-import and rebuild of all layers.
+  - `gameRoot` *(optional)*: Override `RIMSAGE_GAME_ROOT` / remembered installation path.
+
+---
+
 ## How It Works
 
-The vanilla importer rebuilds XML under `Defs/<category>` and `Patches/<category>`. It decompiles each installed target DLL into `Source/<AssemblyName>` when the DLL changes. Pass `--full` to regenerate every assembly.
+### Incremental Sync
 
-1. **Load-Order Accurate**: Mods and DLCs are topologically sorted according to `About.xml` dependencies and RimWorld's load rules.
-2. **Patch Before Inheritance**: Faithful to RimWorld's `LoadedModManager`, XML `PatchOperation` modifications run against the raw unified Def tree before `XmlInheritance` resolves templates and abstract parents.
-3. **Lineage Tracking**: Every Def retains provenance (`defined by ... -> overridden by ... -> effective: ...`), showing exact override origins.
-4. **Zero Hallucination Routing**: Built-in instructions guide AI models to check indexed ground truth (`find_refs`, `get_def_details`, `search_harmony`) rather than guessing class structures or brute-force searching text.
+1. **Two-level input fingerprinting**: Sync hashes the game version, ordered development profile, metadata, and content directories (`About/`, `Defs/`, `Patches/`, `Source/`, `Assemblies/`, `Languages/`, `LoadFolders.xml` — skipping heavy binary assets like `Textures/` and `Sounds/`).
+2. **Windows NTFS USN fast path**: On Windows, when an accessible NTFS change journal is available, unchanged syncs verify in tens of milliseconds across separate CLI/MCP runs; if the journal is unavailable or its cursor rolled over, sync falls back automatically to a content scan.
+3. **Three-tier incremental updates**:
+   - Per-mod asset staging and DLL-hash-cached decompilation.
+   - Per-mod SQLite updates for `mods`, `csharp_index`, `harmony_patches`, and `source_fts` (`contentless_delete=1`). Pure load-order reordering preserves unchanged C#/Harmony/FTS rows.
+   - Globally accurate XML evaluation (`defs` + `patches`) runs only when XML-contributing packages change content or order, a `LoadFolders.xml` selection switches, or a tracked `MayRequire` / `MayRequireAnyOf` / `PatchOperationFindMod` predicate changes outcome.
+4. **Live-reader safe publishing**: Changed files are staged and SQLite updates are committed in a single WAL transaction so connected read-only MCP clients continue querying without interruption.
+
+### RimWorld Pipeline Fidelity
+
+1. **Load-Order Accurate**: Supports topological sorting from `About.xml` rules (`autoOrder: true`) or exact player order (`autoOrder: false`).
+2. **Patch Before Inheritance**: Faithful to RimWorld's `LoadedModManager`, XML `PatchOperation` rules run on the raw unified Def tree before `XmlInheritance` resolves abstract parents and templates.
+3. **Lineage Tracking**: Every Def records its provenance (`defined by ... -> overridden by ... -> effective: ...`).
 
 ---
 
 ## Development & Tests
 
 ```sh
-# Run unit test suite
+# Type-check
+bun run type-check
+
+# Run test suite
 bun test
 
-# Validate patch evaluation against index
+# Validate XML patch evaluation against the current index
 bun run regression:patches
 
-# Scan all patch XML files in workshop folder
+# Scan all patch XML files in the Steam Workshop folder
 bun run regression:patches --workshop
 ```
 
+## Disclaimer
+
+Subcore is intended for RimWorld mod development, compatibility work, and debugging.
+
+While decompiling RimWorld's own assemblies for mod development is permitted under the [RimWorld EULA](https://rimworldgame.com/eula), third-party mods are subject to their respective authors' licenses and terms. **Do not use Subcore to reverse-engineer, decompile, or extract code or assets from mods whose authors have chosen closed-source protection.**
+
+You are solely responsible for how you use this tool. The author of Subcore assumes no responsibility or liability for any disputes, claims, or legal consequences arising from its misuse.
+
 ## License
 
-MIT
+Subcore is licensed under the [GNU General Public License v3.0](./LICENSE) (`GPL-3.0-only`).
+
+Portions of this project are derived from [**realloon/RimSage**](https://github.com/realloon/RimSage) (MIT License); the original copyright and license notice are preserved in [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md).
