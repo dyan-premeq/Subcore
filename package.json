@@ -1,6 +1,6 @@
 {
   "name": "subcore",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "An MCP server for RimWorld mod development: static reconstruction of the modded def pipeline, C#/Harmony indexing and cross-layer reference lookup.",
   "main": "src/stdio.ts",
   "type": "module",
