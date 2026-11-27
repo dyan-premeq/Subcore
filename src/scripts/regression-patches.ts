@@ -32,7 +32,7 @@ async function reportWorkshopCorpus(): Promise<void> {
   const gameRoot = gameRootFromEnv()
   const workshopRoot = workshopRootFromEnv()
   if (!gameRoot) {
-    console.error('RIMSAGE_GAME_ROOT is not set (required for --workshop).')
+    console.error('SUBCORE_GAME_ROOT is not set (required for --workshop).')
     process.exit(1)
   }
 

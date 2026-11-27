@@ -15,7 +15,7 @@ import { searchHarmony, searchHarmonyOutputSchema } from './tools/search-harmony
 import { findRefs, findRefsOutputSchema } from './tools/find-refs'
 import pkg from '../package.json'
 
-const name = 'rimsage'
+const name = 'subcore'
 const version = pkg.version
 const sandbox = new PathSandbox('dist/assets')
 
@@ -428,7 +428,7 @@ function registerTools(server: McpServer) {
       title: 'Sync the mod profile',
       description: 'Refresh imported assets and the index for the configured development profile. Use when asked to sync after changing mods, load order, or source files.',
       inputSchema: z.strictObject({
-        gameRoot: z.string().min(1).optional().describe('Local RimWorld installation. Defaults to RIMSAGE_GAME_ROOT or the previously imported installation.'),
+        gameRoot: z.string().min(1).optional().describe('Local RimWorld installation. Defaults to SUBCORE_GAME_ROOT or the previously imported installation.'),
         fromGameConfig: z.boolean().default(false).describe('Replace the development profile with a snapshot of the player ModsConfig.xml before syncing.'),
         full: z.boolean().default(false).describe('Reimport and rebuild all layers even when the inputs are unchanged.'),
       }),

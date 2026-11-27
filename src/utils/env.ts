@@ -17,18 +17,18 @@ export const modsManifestPath = join(distPath, 'mods-manifest.json')
 // set process.env at runtime.
 
 export function gameRootFromEnv(): string | undefined {
-  return process.env.RIMSAGE_GAME_ROOT
+  return process.env.SUBCORE_GAME_ROOT
 }
 
 export function workshopRootFromEnv(): string | undefined {
-  return process.env.RIMSAGE_WORKSHOP_ROOT
+  return process.env.SUBCORE_WORKSHOP_ROOT
 }
 
 export function modsConfigFromEnv(): string | undefined {
-  return process.env.RIMSAGE_MODS_CONFIG
+  return process.env.SUBCORE_MODS_CONFIG
 }
 
 export function profilePathFromEnv(): string {
-  return process.env.RIMSAGE_PROFILE ?? join(root, 'rimsage.profile.json')
+  return process.env.SUBCORE_PROFILE ?? join(root, 'subcore.profile.json')
 }
 // #endregion

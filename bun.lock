@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "rimsage",
+      "name": "subcore",
       "dependencies": {
         "@modelcontextprotocol/server": "^2.4.0",
         "fast-xml-builder": "^1.3.2",

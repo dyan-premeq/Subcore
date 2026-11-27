@@ -29,7 +29,7 @@ export interface LoadedProfile {
   warnings: string[]
 }
 
-/** Loads the profile file (env RIMSAGE_PROFILE or <repo>/rimsage.profile.json). */
+/** Loads the profile file (env SUBCORE_PROFILE or <repo>/subcore.profile.json). */
 export function loadProfile(path = profilePathFromEnv()): LoadedProfile {
   if (!existsSync(path)) {
     return { profile: vanillaProfile(), exists: false, warnings: [] }

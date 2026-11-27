@@ -3,4 +3,4 @@ import { createServer } from './server'
 
 serveStdio(createServer)
 
-console.error('\x1b[32m%s\x1b[0m', 'RimSage MCP running...')
+console.error('\x1b[32m%s\x1b[0m', 'Subcore MCP running...')

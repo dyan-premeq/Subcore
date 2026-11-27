@@ -29,13 +29,13 @@ bun install
 
 ### 3. 第一次同步
 
-第一次运行需要传入包含 RimWorld `Version.txt` 的游戏根目录。跑过一次后 Subcore 会记住这个路径，后续不用再传（也可以通过环境变量 `RIMSAGE_GAME_ROOT` 覆盖）。
+第一次运行需要传入包含 RimWorld `Version.txt` 的游戏根目录。跑过一次后 Subcore 会记住这个路径，后续不用再传（也可以通过环境变量 `SUBCORE_GAME_ROOT` 覆盖）。
 
-- **直接照搬你游戏里当前启用的 Mod 列表**（读取 `ModsConfig.xml` 写入 `rimsage.profile.json` 并建索引）：
+- **直接照搬你游戏里当前启用的 Mod 列表**（读取 `ModsConfig.xml` 写入 `subcore.profile.json` 并建索引）：
   ```sh
   bun run sync "/path/to/RimWorld" --from-game-config
   ```
-- **或者自己维护开发列表**（先写好 `rimsage.profile.json` 再运行；如果文件不存在，会按纯原版 + 全 DLC 索引）：
+- **或者自己维护开发列表**（先写好 `subcore.profile.json` 再运行；如果文件不存在，会按纯原版 + 全 DLC 索引）：
   ```sh
   bun run sync "/path/to/RimWorld"
   ```
@@ -50,10 +50,10 @@ Subcore 刻意把**开发用 Mod 列表（Profile）**和**游戏里的 `ModsCon
 
 | 来源 | 用途 | 默认会读吗？ |
 | --- | --- | --- |
-| `rimsage.profile.json`（可用 `RIMSAGE_PROFILE` 或 `--profile` 指定） | Subcore 导入和建索引的**唯一默认依据** | **会**（`bun run sync` 和 MCP `sync_profile` 默认都读它） |
-| RimWorld 的 `ModsConfig.xml`（自动探测，也可用 `RIMSAGE_MODS_CONFIG` / `--mods-config` 指定） | 玩家当前在游戏里启用的 Mod 列表 | **不会**——只有显式传 `--from-game-config` 或 `fromGameConfig: true` 时才会读取 |
+| `subcore.profile.json`（可用 `SUBCORE_PROFILE` 或 `--profile` 指定） | Subcore 导入和建索引的**唯一默认依据** | **会**（`bun run sync` 和 MCP `sync_profile` 默认都读它） |
+| RimWorld 的 `ModsConfig.xml`（自动探测，也可用 `SUBCORE_MODS_CONFIG` / `--mods-config` 指定） | 玩家当前在游戏里启用的 Mod 列表 | **不会**——只有显式传 `--from-game-config` 或 `fromGameConfig: true` 时才会读取 |
 
-这样设计的原因很简单：写 Mod 时通常只想固定测几个依赖 Mod，不想自己换个几百 Mod 的日常档玩一局，回头把开发索引全冲掉。所以平时直接跑 `bun run sync`，只会按现有的 `rimsage.profile.json` 检查文件变化（包括修改 profile、本地 Mod 改动、创意工坊更新、游戏本体更新）并做增量同步，**不会**去读 `ModsConfig.xml`。
+这样设计的原因很简单：写 Mod 时通常只想固定测几个依赖 Mod，不想自己换个几百 Mod 的日常档玩一局，回头把开发索引全冲掉。所以平时直接跑 `bun run sync`，只会按现有的 `subcore.profile.json` 检查文件变化（包括修改 profile、本地 Mod 改动、创意工坊更新、游戏本体更新）并做增量同步，**不会**去读 `ModsConfig.xml`。
 
 当你确实想把游戏里当前的 Mod 列表同步过来时，再显式加上 `--from-game-config`。
 
@@ -63,7 +63,7 @@ Subcore 刻意把**开发用 Mod 列表（Profile）**和**游戏里的 `ModsCon
 # 按当前开发 profile 做增量同步（没改动时很快就会跳过）
 bun run sync
 
-# 用游戏当前的 ModsConfig.xml 覆盖 rimsage.profile.json，然后同步
+# 用游戏当前的 ModsConfig.xml 覆盖 subcore.profile.json，然后同步
 bun run sync --from-game-config
 
 # 强制全量重新导入并重建所有索引
@@ -80,7 +80,7 @@ bun run sync "/path/to/RimWorld" \
 
 如果只想单独跑某个步骤，原来的 `import:vanilla`、`import:mods`、`clean`、`index:*` 和 `build` 脚本也都保留着。
 
-### `rimsage.profile.json` 格式
+### `subcore.profile.json` 格式
 
 ```jsonc
 {
@@ -102,10 +102,10 @@ bun run sync "/path/to/RimWorld" \
 
 | 变量名 | 说明 |
 | --- | --- |
-| `RIMSAGE_GAME_ROOT` | RimWorld 安装目录（优先级高于上次记住的路径） |
-| `RIMSAGE_WORKSHOP_ROOT` | Steam 创意工坊 `294100` 目录（默认会顺着游戏目录自动找） |
-| `RIMSAGE_MODS_CONFIG` | `ModsConfig.xml` 路径（仅在传 `--from-game-config` / `fromGameConfig: true` 时生效） |
-| `RIMSAGE_PROFILE` | 换用其他 profile JSON 文件（默认 `<仓库根目录>/rimsage.profile.json`） |
+| `SUBCORE_GAME_ROOT` | RimWorld 安装目录（优先级高于上次记住的路径） |
+| `SUBCORE_WORKSHOP_ROOT` | Steam 创意工坊 `294100` 目录（默认会顺着游戏目录自动找） |
+| `SUBCORE_MODS_CONFIG` | `ModsConfig.xml` 路径（仅在传 `--from-game-config` / `fromGameConfig: true` 时生效） |
+| `SUBCORE_PROFILE` | 换用其他 profile JSON 文件（默认 `<仓库根目录>/subcore.profile.json`） |
 | `PORT` | `bun run start:http` 的监听端口（默认 `3000`） |
 
 命令行参数的优先级高于环境变量。

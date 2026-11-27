@@ -445,7 +445,7 @@ export function escapePackageDirName(packageId: string): string {
 /**
  * Steam default layout: game lives at <steam>/steamapps/common/RimWorld ->
  * workshop content at <steam>/steamapps/workshop. Anything else: set
- * RIMSAGE_WORKSHOP_ROOT.
+ * SUBCORE_WORKSHOP_ROOT.
  */
 export function inferWorkshopRoot(gameRoot: string): string | undefined {
   const candidate = join(gameRoot, '../../workshop')

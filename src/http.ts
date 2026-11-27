@@ -20,5 +20,5 @@ const httpServer = serve({
 
 console.error(
   '\x1b[32m%s\x1b[0m',
-  `RimSage MCP HTTP server listening on ${httpServer.url}`,
+  `Subcore MCP HTTP server listening on ${httpServer.url}`,
 )

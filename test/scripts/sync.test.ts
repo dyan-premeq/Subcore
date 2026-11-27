@@ -28,8 +28,8 @@ const patchSource = (name: string) =>
 const pack = 'Mods/content.pack'
 
 beforeEach(async () => {
-  configuredRoot = process.env.RIMSAGE_GAME_ROOT
-  delete process.env.RIMSAGE_GAME_ROOT
+  configuredRoot = process.env.SUBCORE_GAME_ROOT
+  delete process.env.SUBCORE_GAME_ROOT
   temp = await mkdtemp(join(tmpdir(), 'subcore-sync-'))
   game = join(temp, 'game')
   dist = join(temp, 'dist')
@@ -49,7 +49,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  if (configuredRoot !== undefined) process.env.RIMSAGE_GAME_ROOT = configuredRoot
+  if (configuredRoot !== undefined) process.env.SUBCORE_GAME_ROOT = configuredRoot
   reader?.close(true)
   reader = undefined
   await rmTemp(temp)

@@ -93,7 +93,7 @@ export async function syncProfile(options: SyncOptions = {}): Promise<SyncResult
     const manifestText = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : ''
     const prior: ModsManifest | null = manifestText ? JSON.parse(manifestText) : null
     const root = options.gameRoot ?? gameRootFromEnv() ?? importedGameRoot(dist, prior) ?? getMeta(db, 'game_root')
-    if (!root) throw new Error('First sync needs a game root. Pass gameRoot or set RIMSAGE_GAME_ROOT.')
+    if (!root) throw new Error('First sync needs a game root. Pass gameRoot or set SUBCORE_GAME_ROOT.')
     const gameRoot = resolve(root)
     const versionText = readFileSync(join(gameRoot, 'Version.txt'), 'utf8')
     const gameVersion = parseVersionTxt(versionText)

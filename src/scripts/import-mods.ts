@@ -288,7 +288,7 @@ export async function snapshotProfileFromGameConfig(
 ): Promise<Profile> {
   const active = readPlayerActiveMods(modsConfigPath)
   if (active === null) {
-    throw new Error('Could not read ModsConfig.xml. Set RIMSAGE_MODS_CONFIG or pass --mods-config <path>.')
+    throw new Error('Could not read ModsConfig.xml. Set SUBCORE_MODS_CONFIG or pass --mods-config <path>.')
   }
 
   const installed = gameRoot ? discoverBaseMods({ gameRoot }).map(mod => mod.packageId) : undefined
@@ -316,11 +316,11 @@ function printUsage(): void {
 Options:
   --from-game-config    snapshot player ModsConfig.xml into a profile draft, then exit
   --out <path>          output path for the profile snapshot
-  --profile <path>      profile file to use (default: RIMSAGE_PROFILE or rimsage.profile.json)
+  --profile <path>      profile file to use (default: SUBCORE_PROFILE or subcore.profile.json)
   --workshop-root <p>   workshop content root (default: inferred from gameRoot)
   --mods-config <path>  ModsConfig.xml path (default: auto-discovered)
   --full                force full re-copy (ignore incremental mtime/size)
-  gameRoot defaults to RIMSAGE_GAME_ROOT or the last imported installation.
+  gameRoot defaults to SUBCORE_GAME_ROOT or the last imported installation.
 `)
 }
 
@@ -353,7 +353,7 @@ if (import.meta.main) {
 
   if (!gameRoot || !existsSync(join(gameRoot, 'Version.txt'))) {
     console.error(
-      'Game root not found (need a path with Version.txt). Pass it or set RIMSAGE_GAME_ROOT.',
+      'Game root not found (need a path with Version.txt). Pass it or set SUBCORE_GAME_ROOT.',
     )
     process.exit(1)
   }
@@ -370,9 +370,9 @@ if (import.meta.main) {
   }
 
   if (args.includes('--from-game-config')) {
-    const out = flagValue(args, '--out') ?? process.env.RIMSAGE_PROFILE
+    const out = flagValue(args, '--out') ?? process.env.SUBCORE_PROFILE
     if (!out) {
-      console.error('--from-game-config needs --out <path> or RIMSAGE_PROFILE set.')
+      console.error('--from-game-config needs --out <path> or SUBCORE_PROFILE set.')
       process.exit(1)
     }
     await snapshotProfileFromGameConfig(out, flagValue(args, '--mods-config'), gameRoot)
@@ -384,7 +384,7 @@ if (import.meta.main) {
     gameVersion,
     workshopRoot: flagValue(args, '--workshop-root'),
     modsConfigPath: flagValue(args, '--mods-config'),
-    profilePath: flagValue(args, '--profile') ?? process.env.RIMSAGE_PROFILE,
+    profilePath: flagValue(args, '--profile') ?? process.env.SUBCORE_PROFILE,
     full: args.includes('--full'),
   })
 }

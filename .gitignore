@@ -9,5 +9,5 @@ AGENTS.md
 # local working docs
 docs/
 # local-only artifacts: personal mod profile + agent session logs
-rimsage.profile.json
+subcore.profile.json
 *-local-command-caveat*.txt

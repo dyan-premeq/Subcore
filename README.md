@@ -29,13 +29,13 @@ bun install
 
 ### 3. Run Your First Sync
 
-On the first sync, pass the directory containing RimWorld's `Version.txt`. Subcore remembers this path for future runs (or you can set `RIMSAGE_GAME_ROOT`).
+On the first sync, pass the directory containing RimWorld's `Version.txt`. Subcore remembers this path for future runs (or you can set `SUBCORE_GAME_ROOT`).
 
-- **Start from your current RimWorld mod list** (snapshots `ModsConfig.xml` into `rimsage.profile.json` and indexes it):
+- **Start from your current RimWorld mod list** (snapshots `ModsConfig.xml` into `subcore.profile.json` and indexes it):
   ```sh
   bun run sync "/path/to/RimWorld" --from-game-config
   ```
-- **Or use a hand-curated development profile** (edit `rimsage.profile.json`, then sync; if the file is missing, Subcore falls back to vanilla-only):
+- **Or use a hand-curated development profile** (edit `subcore.profile.json`, then sync; if the file is missing, Subcore falls back to vanilla-only):
   ```sh
   bun run sync "/path/to/RimWorld"
   ```
@@ -50,10 +50,10 @@ Subcore deliberately separates your **development profile** from the game's live
 
 | Source                                                                                 | Role                                                                | Used by default?                                                                           |
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `rimsage.profile.json` (or `RIMSAGE_PROFILE` / `--profile`)                            | **Single source of truth** for what Subcore imports and indexes     | **Yes** (`bun run sync`, MCP `sync_profile`)                                               |
-| RimWorld `ModsConfig.xml` (auto-discovered or `RIMSAGE_MODS_CONFIG` / `--mods-config`) | Optional snapshot source of the player's currently enabled mod list | **No** — only read when you explicitly pass `--from-game-config` or `fromGameConfig: true` |
+| `subcore.profile.json` (or `SUBCORE_PROFILE` / `--profile`)                            | **Single source of truth** for what Subcore imports and indexes     | **Yes** (`bun run sync`, MCP `sync_profile`)                                               |
+| RimWorld `ModsConfig.xml` (auto-discovered or `SUBCORE_MODS_CONFIG` / `--mods-config`) | Optional snapshot source of the player's currently enabled mod list | **No** — only read when you explicitly pass `--from-game-config` or `fromGameConfig: true` |
 
-Why? When developing a mod, your curated test profile should stay stable even if you change mods for a personal playthrough. Ordinary sync refreshes files and indexes for the **configured development profile** (picking up edits to `rimsage.profile.json`, local mod changes, Steam Workshop updates, or RimWorld version updates) without touching it from `ModsConfig.xml`.
+Why? When developing a mod, your curated test profile should stay stable even if you change mods for a personal playthrough. Ordinary sync refreshes files and indexes for the **configured development profile** (picking up edits to `subcore.profile.json`, local mod changes, Steam Workshop updates, or RimWorld version updates) without touching it from `ModsConfig.xml`.
 
 ### Common Sync Commands
 
@@ -61,7 +61,7 @@ Why? When developing a mod, your curated test profile should stay stable even if
 # Incremental sync of the current development profile (fast no-op when unchanged)
 bun run sync
 
-# Overwrite rimsage.profile.json with RimWorld's active ModsConfig.xml, then sync
+# Overwrite subcore.profile.json with RimWorld's active ModsConfig.xml, then sync
 bun run sync --from-game-config
 
 # Force a full re-import and rebuild of all indexes even when inputs are unchanged
@@ -78,7 +78,7 @@ bun run sync "/path/to/RimWorld" \
 
 Individual stage scripts (`import:vanilla`, `import:mods`, `clean`, `index:mods`, `index:defs`, `index:patches`, `index:csharp`, `index:source`, `build`) remain available for single-stage workflows.
 
-### Profile Format (`rimsage.profile.json`)
+### Profile Format (`subcore.profile.json`)
 
 ```jsonc
 {
@@ -100,10 +100,10 @@ When generated via `--from-game-config`, Subcore sets `autoOrder: false` to pres
 
 | Variable                | Purpose                                                                                 |
 | ----------------------- | --------------------------------------------------------------------------------------- |
-| `RIMSAGE_GAME_ROOT`     | RimWorld installation directory (overrides the remembered path)                         |
-| `RIMSAGE_WORKSHOP_ROOT` | Steam Workshop `294100` folder (auto-discovered beside the game root by default)        |
-| `RIMSAGE_MODS_CONFIG`   | Path to `ModsConfig.xml` (used only with `--from-game-config` / `fromGameConfig: true`) |
-| `RIMSAGE_PROFILE`       | Alternate profile JSON path (defaults to `<repo>/rimsage.profile.json`)                 |
+| `SUBCORE_GAME_ROOT`     | RimWorld installation directory (overrides the remembered path)                         |
+| `SUBCORE_WORKSHOP_ROOT` | Steam Workshop `294100` folder (auto-discovered beside the game root by default)        |
+| `SUBCORE_MODS_CONFIG`   | Path to `ModsConfig.xml` (used only with `--from-game-config` / `fromGameConfig: true`) |
+| `SUBCORE_PROFILE`       | Alternate profile JSON path (defaults to `<repo>/subcore.profile.json`)                 |
 | `PORT`                  | Listening port for `bun run start:http` (defaults to `3000`)                            |
 
 CLI flags take precedence over environment variables.
@@ -187,7 +187,7 @@ Subcore exposes **10 read-only query tools** and **1 explicit sync tool**.
 - **`sync_profile`** — Refresh imported assets and the SQLite index for the configured development profile.
   - `fromGameConfig` *(default `false`)*: Set `true` **only** when you explicitly want to replace the development profile with a snapshot of `ModsConfig.xml` before syncing.
   - `full` *(default `false`)*: Force a fresh re-import and rebuild of all layers.
-  - `gameRoot` *(optional)*: Override `RIMSAGE_GAME_ROOT` / remembered installation path.
+  - `gameRoot` *(optional)*: Override `SUBCORE_GAME_ROOT` / remembered installation path.
 
 ---
 

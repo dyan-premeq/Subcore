@@ -63,14 +63,14 @@ describe('profile', () => {
 
   test('discovers the Waylith config paths on Windows, Linux/XDG and macOS', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'rimsage-config-'))
-    const keys = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'LOCALAPPDATA', 'RIMSAGE_MODS_CONFIG']
+    const keys = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'LOCALAPPDATA', 'SUBCORE_MODS_CONFIG']
     const original = keys.map(key => process.env[key])
     try {
       process.env.HOME = dir
       process.env.USERPROFILE = dir
       process.env.LOCALAPPDATA = join(dir, 'AppData/Local')
       process.env.XDG_CONFIG_HOME = join(dir, 'custom')
-      delete process.env.RIMSAGE_MODS_CONFIG
+      delete process.env.SUBCORE_MODS_CONFIG
       const suffix = 'Ludeon Studios/RimWorld by Ludeon Studios/Config/ModsConfig.xml'
       const locations = [
         ['win32', join(dir, 'AppData/LocalLow', suffix)],

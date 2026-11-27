@@ -81,10 +81,10 @@ export function importVanillaSource(gameRoot: string, assets: string, full: bool
 if (import.meta.main) {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: bun run import:vanilla [gameRoot] [--full]\ngameRoot defaults to RIMSAGE_GAME_ROOT or the last imported installation.')
+    console.log('Usage: bun run import:vanilla [gameRoot] [--full]\ngameRoot defaults to SUBCORE_GAME_ROOT or the last imported installation.')
   } else {
     const gameRoot = args.find(arg => !arg.startsWith('-')) ?? gameRootFromEnv() ?? importedGameRoot()
-    if (!gameRoot) throw new Error('Pass the game root or set RIMSAGE_GAME_ROOT.')
+    if (!gameRoot) throw new Error('Pass the game root or set SUBCORE_GAME_ROOT.')
     importVanilla({ gameRoot, full: args.includes('--full') })
   }
 }
